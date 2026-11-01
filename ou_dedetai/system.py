@@ -456,6 +456,10 @@ def get_package_manager() -> PackageManager | None:
             "p7zip-full cabextract " # winetricks
             "xdg-utils " # For xdg-mime needed for custom url scheme registration
             "mesa-utils "  # verify opengl version
+            # media playback: winegstreamer decodes with the host's GStreamer
+            # (videos, audiobooks); see the media playback notes in wine.py
+            "gstreamer1.0-plugins-base gstreamer1.0-plugins-good "
+            "gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav "
         )
 
         # Now set the appimage packages, this has changed over time
@@ -508,6 +512,9 @@ def get_package_manager() -> PackageManager | None:
             "xdg-utils " # For xdg-mime needed for custom url scheme registration
             "glx-utils"  # verify opengl version
         )
+        # FIXME: media playback needs GStreamer's base/good/bad/ugly plugins and an
+        # H.264/AAC decoder (gstreamer1-plugin-libav or gstreamer1-plugin-openh264);
+        # package names vary with RPM Fusion, so they aren't added here yet.
         incompatible_packages = ""  # appimagelauncher handled separately
     elif shutil.which('zypper') is not None:  # OpenSUSE
         install_command = ["zypper", "--non-interactive", "install"]
@@ -524,6 +531,8 @@ def get_package_manager() -> PackageManager | None:
             "xdg-utils " # For xdg-mime needed for custom url scheme registration
             "Mesa-demo-x"  # verify opengl version
         )
+        # FIXME: media playback needs gstreamer-plugins-{base,good,bad,ugly} and
+        # gstreamer-plugins-libav (Packman); not added here yet.
         incompatible_packages = ""  # appimagelauncher handled separately
     elif shutil.which('apk') is not None:  # alpine
         install_command = ["apk", "--no-interactive", "add"]
@@ -555,6 +564,7 @@ def get_package_manager() -> PackageManager | None:
             "7zip cabextract "  # winetricks (7zip used to be called p7zip)
             "xdg-utils " # For xdg-mime needed for custom url scheme registration
             "mesa-utils "  # verify opengl version
+            "gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav "  # media playback
         )
         incompatible_packages = ""  # appimagelauncher handled separately
     elif shutil.which('pacman') is not None:  # arch, steamOS
@@ -586,6 +596,7 @@ def get_package_manager() -> PackageManager | None:
                 "openjpeg2 libxcomposite libxinerama "  # display
                 "ocl-icd vulkan-icd-loader "  # hardware
                 "alsa-plugins gst-plugins-base-libs libpulse openal "  # audio
+                "gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav "  # media playback
                 "libva mpg123 v4l-utils "  # video
                 "libxslt sqlite "  # misc
                 "xdg-utils " # For xdg-mime needed for custom url scheme registration

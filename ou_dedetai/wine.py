@@ -373,6 +373,72 @@ def set_renderer(app: App, wine64_binary: str, value: str):
     wine_reg_install(app, name, reg_text, wine64_binary)
 
 
+# Media playback (video courses, audiobooks and synced audio read-aloud)
+# =======================================================================
+# Logos plays media through Media Foundation: a media session feeds Wine's
+# Enhanced Video Renderer (EVR), which hands frames to Logos's own presenter
+# (Logos/System/EVRPresenter.dll). That presenter copies each frame out of a
+# Direct3D 9 surface into WPF's D3DImage. So video needs:
+#
+# 1. A Direct3D renderer. With renderer=gdi (OuDedetai's old default),
+#    IDirect3D9Ex::CreateDeviceEx fails with D3DERR_INVALIDCALL, the EVR
+#    can't start, and video resources show neither picture nor sound.
+#    renderer=gl works. renderer=vulkan (wined3d's Vulkan backend) also gives
+#    a real Direct3D device, though it hasn't been tested with Logos video; it
+#    is left alone if the user picked it. DXVK doesn't work yet: the frames the
+#    presenter copies into user memory are never filled.
+# 2. WPF hardware rendering. WPF only uses the D3DImage path with hardware
+#    rendering, so HKCU\Software\Microsoft\Avalon.Graphics\
+#    DisableHWAcceleration must not be set to 1 (that gives a white box).
+#    OuDedetai never sets it; users who added it by hand should remove it.
+# 3. Wine's FFmpeg-based media source (winedmo) instead of the GStreamer one.
+#    Wine (checked on 11.21) only uses the FFmpeg source when
+#    HKCU\Software\Wine\MediaFoundation\DisableGstByteStreamHandler is a
+#    non-zero DWORD (see use_gst_byte_stream_handler() in
+#    dlls/mfsrcsnk/media_source.c). The GStreamer source can hang on rapid
+#    seeking (wg_parser_stream_get_buffer); the FFmpeg source doesn't.
+#    Older Wine ignores the value, and a Wine built without FFmpeg falls back
+#    to the GStreamer source by itself, so setting it is always safe.
+# 4. Host GStreamer plugins. Decoding still goes through winegstreamer, which
+#    uses the system's GStreamer; the Wine AppImage doesn't bundle plugins.
+#    See the per-distro package lists in system.get_package_manager().
+# 5. A Wine with the EVR/d3d9/wined3d fixes for Logos's presenter (black
+#    video, freeze on resize, deadlock on seek). These are on the
+#    FaithLife-Community/wine branch logos-11.21-media and go into the
+#    FaithLife-Community Wine AppImage; they're being sent upstream.
+#    Without them audio still plays but the picture stays black.
+MEDIA_RENDERER = "gl"
+# Renderers OuDedetai replaces with MEDIA_RENDERER. gdi was OuDedetai's forced
+# default until now; "dxvk" is not a renderer Wine knows (it was offered in the
+# TUI menu) so Wine silently falls back to its default anyway.
+MEDIA_REPLACED_RENDERERS = (None, "", "gdi", "no3d", "dxvk")
+
+
+def ensure_media_renderer(app: App, wine64_binary: str):
+    """Make sure the wineprefix has a Direct3D renderer that can play video.
+
+    Moves prefixes on gdi (the old default) or with no renderer set to
+    MEDIA_RENDERER. A renderer the user chose deliberately (gl, vulkan) is kept.
+    """
+    current = wine_reg_query(app, "HKEY_CURRENT_USER\\Software\\Wine\\Direct3D", "renderer")
+    if current in MEDIA_REPLACED_RENDERERS:
+        logging.info(f"Setting renderer={MEDIA_RENDERER} (was {current!r}) so Logos can play video.")
+        set_renderer(app, wine64_binary, MEDIA_RENDERER)
+    else:
+        logging.debug(f"Keeping renderer={current!r}; it supports video playback.")
+
+
+def configure_media_playback(app: App, wine64_binary: str):
+    """Use Wine's FFmpeg media source for Logos videos and audiobooks. See above."""
+    name = 'configure-media-playback.reg'
+    reg_text = r'''REGEDIT4
+
+[HKEY_CURRENT_USER\Software\Wine\MediaFoundation]
+"DisableGstByteStreamHandler"=dword:00000001
+'''
+    wine_reg_install(app, name, reg_text, wine64_binary)
+
+
 def set_fontsmoothing_to_rgb(app: App, wine64_binary: str):
     # Possible registry values:
     # "disable":      FontSmoothing=0; FontSmoothingOrientation=1; FontSmoothingType=0

@@ -332,9 +332,14 @@ def ensure_wineprefix_config(app: App):
     logging.debug("Setting wineprefix registry to ignore winemenubuilder.exe.")
     wine.disable_winemenubuilder(app=app, wine64_binary=app.conf.wine64_binary)
 
-    # Force renderer=gdi in registry.
-    logging.debug("Setting renderer=gdi in wineprefix registry.")
-    wine.set_renderer(app=app, wine64_binary=app.conf.wine64_binary, value='gdi')
+    # Use a Direct3D renderer that can play video (gdi can't). Replaces the old
+    # forced renderer=gdi; see the media playback notes in wine.py.
+    logging.debug("Ensuring the wineprefix renderer supports video playback.")
+    wine.ensure_media_renderer(app=app, wine64_binary=app.conf.wine64_binary)
+
+    # Media playback: use Wine's FFmpeg media source.
+    logging.debug("Configuring wineprefix for media playback.")
+    wine.configure_media_playback(app=app, wine64_binary=app.conf.wine64_binary)
 
     # Force fontsmooth=rgb in registry.
     logging.debug("Setting fontsmoothing=rgb in wineprefix registry.")
