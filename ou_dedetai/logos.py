@@ -163,7 +163,10 @@ class LogosManager:
         self.logos_state = State.STARTING
         self._launch_started = time.monotonic()
         self._launch_finished = False
-        wine_release, _ = wine.get_wine_release(self.app.conf.wine_binary)
+        version_env = os.environ.copy()
+        if self.app.conf.piper_enabled:
+            version_env['APPIMAGE_EXTRACT_AND_RUN'] = '1'
+        wine_release, _ = wine.get_wine_release(self.app.conf.wine_binary, env=version_env)
 
         def run_logos():
             try:

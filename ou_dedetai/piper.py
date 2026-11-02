@@ -19,8 +19,8 @@ import psutil
 from ou_dedetai.constants import PROMPT_OPTION_FILE
 
 
-BACKEND_RELEASE = 'piper-backend-41387876573-1'
-BACKEND_SHA256 = 'ad86e29128e65e3670ad94acc86fb4c59199a536fcbc7507c77831cf9763681f'
+BACKEND_RELEASE = 'piper-backend-41388556427-1'
+BACKEND_SHA256 = 'b88af610f3c3f0160a9a0792cac8d739ac07186fbcbbd03fb196a9a1b704402d'
 BACKEND_URL = (f'https://github.com/jg00dman/opensapi/releases/download/{BACKEND_RELEASE}/'
                'opensapi-piper-linux-x86_64.tar.xz')
 

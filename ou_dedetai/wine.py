@@ -72,10 +72,10 @@ def get_devel_or_stable(version: str) -> str:
 
 
 # FIXME: consider raising exceptions on error
-def get_wine_release(binary: str) -> tuple[Optional[WineRelease], str]:
+def get_wine_release(binary: str, env: Optional[dict[str, str]] = None) -> tuple[Optional[WineRelease], str]:
     cmd = [binary, "--version"]
     try:
-        version_string = subprocess.check_output(cmd, encoding='utf-8').strip()
+        version_string = subprocess.check_output(cmd, encoding='utf-8', env=env).strip()
         logging.debug(f"Version string: {str(version_string)}")
         branch: Optional[str]
         try:
@@ -757,6 +757,7 @@ def get_wine_env(app: App, additional_wine_dll_overrides: Optional[str]=None) ->
 
     if app.conf.piper_enabled:
         wine_env["WINEDLLOVERRIDES"] += ";sapi=b"
+        wine_env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
 
     updated_env = {k: wine_env.get(k) for k in wine_env_defaults.keys()}
     logging.debug(f"Wine env: {updated_env}")
