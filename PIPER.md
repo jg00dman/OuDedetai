@@ -12,7 +12,7 @@ licence notices and the en_US-ljspeech-medium ONNX voice/configuration.
 No system Python, compiler, distro Piper package or pip installation is needed.
 Currently the backend package targets x86-64 Linux with glibc 2.35 or newer.
 The corresponding sources and licence provenance are available at:
-https://github.com/jg00dman/opensapi/releases/tag/piper-backend-41386724441-1
+https://github.com/jg00dman/opensapi/releases/tag/piper-backend-41387876573-1
 
 The model repository declares MIT, and its individual model card identifies a
 public-domain LJ Speech dataset and training from scratch. These declarations
@@ -48,3 +48,9 @@ Logos with Piper absent; killing Piper during Read Aloud; restarting it and
 retrying; a missing/corrupt model; backend errors and slow responses. Check that
 Logos remains usable and that stop/jump controls respond during an active request.
 Automated transport/PCM and lifecycle tests do not replace those desktop checks.
+
+Validation: the first integration build passed all 95 tests (16 existing skips)
+in GitHub Actions and produced x86-64 and ARM OuDedetai executables. Local full
+suite has a pre-existing filesystem-size assertion failure; the 18 new tests
+pass locally and in CI. Actual packaged-server readiness, ownership-safe external
+reuse, stop and restart were also tested independently of mocks and Logos.
