@@ -26,6 +26,7 @@ from . import logos
 from . import system
 from . import utils
 from . import wine
+from . import piper
 
 
 class StatusLog(Log):
@@ -571,7 +572,17 @@ class TUI(App):
             self.go_to_main_menu()
             return
         try:
-            if choice == "Remove Library Catalog":
+            if choice == "Install Piper":
+                piper.install(self)
+            elif choice == "Configure Piper":
+                piper.configure(self)
+            elif choice == "Start Piper":
+                piper.start(self)
+            elif choice == "Stop Piper":
+                piper.stop(self)
+            elif choice == "Disable Piper":
+                piper.disable(self)
+            elif choice == "Remove Library Catalog":
                 control.remove_library_catalog(self)
             elif choice == "Remove All Index Files":
                 control.remove_all_index_files(self)
@@ -637,14 +648,16 @@ class TUI(App):
     def set_utilities_menu_options(self) -> list[str]:
         labels: list[str] = []
         if self.is_installed():
-            labels.extend(["Remove Library Catalog", "Remove All Index Files", "Install ICU"])
+            labels.extend(["Remove Library Catalog", "Remove All Index Files", "Install ICU",
+                           "Install Piper", "Configure Piper", "Start Piper", "Stop Piper", "Disable Piper"])
         if (
             self.is_installed()
             or Path(self.conf.config_file_path).exists()
             or (getattr(self.conf._raw, "install_dir", None) and Path(self.conf._raw.install_dir).exists())
         ):
             labels.append("Uninstall")
-        labels.extend([f"Check for {constants.APP_NAME} Updates", "Install Dependencies", "Edit Config", "Reload Config"])
+        labels.extend([f"Check for {constants.APP_NAME} Updates", "Install Dependencies",
+                       "Edit Config", "Reload Config"])
         if self.is_installed():
             labels.extend([
                 "Change Logos Release Channel",

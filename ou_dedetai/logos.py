@@ -15,6 +15,7 @@ from ou_dedetai.config import get_logos_user_id
 from . import system
 from . import utils
 from . import wine
+from . import piper
 
 
 class State(Enum):
@@ -29,6 +30,9 @@ class LogosManager:
         self.logos_state = State.STOPPED
         self.indexing_state = State.STOPPED
         self.app = app
+        self.piper = piper.PiperManager(app)
+        self._launch_started = 0.0
+        self._launch_finished = False
         self.processes: dict[str, subprocess.Popen] = {}
         """These are sub-processes we started"""
         self.existing_processes: dict[str, list[psutil.Process]] = {}
@@ -62,6 +66,9 @@ class LogosManager:
         if self.logos_state == State.STARTING:
             if login_running or cef_running:
                 self.logos_state = State.RUNNING
+            elif self._launch_finished and not splash_running and time.monotonic() - self._launch_started > 60:
+                self.piper.stop()
+                self.logos_state = State.STOPPED
         elif self.logos_state == State.RUNNING:
             if not any((splash_running, login_running, cef_running)):
                 self.stop()
@@ -154,21 +161,36 @@ class LogosManager:
 
     def start(self):
         self.logos_state = State.STARTING
+        self._launch_started = time.monotonic()
+        self._launch_finished = False
         wine_release, _ = wine.get_wine_release(self.app.conf.wine_binary)
 
         def run_logos():
-            self.prevent_logos_updates()
-            self.set_auto_updates(False)
-            if not self.app.conf.logos_exe:
-                raise ValueError("Could not find installed Logos EXE to run")
-            process = wine.run_wine_application(
-                self.app,
-                self.app.conf.wine_binary,
-                exe=self.app.conf.logos_exe
-            )
-            if process is not None:
-                self.processes[self.app.conf.logos_exe] = process
-            self.logos_state = State.RUNNING
+            try:
+                if self.app.conf.piper_enabled:
+                    piper.start(self.app)
+                self.prevent_logos_updates()
+                self.set_auto_updates(False)
+                if not self.app.conf.logos_exe:
+                    raise ValueError("Could not find installed Logos EXE to run")
+                self._launch_started = time.monotonic()
+                process = wine.run_wine_application(
+                    self.app,
+                    self.app.conf.wine_binary,
+                    exe=self.app.conf.logos_exe
+                )
+                if process is not None:
+                    self.processes[self.app.conf.logos_exe] = process
+                self._launch_finished = True
+                if process is None:
+                    self.piper.stop()
+                    self.logos_state = State.STOPPED
+            except Exception:
+                logging.exception("Could not launch Logos")
+                self.piper.stop()
+                self.logos_state = State.STOPPED
+            finally:
+                self._launch_finished = True
 
         # Ensure wine version is compatible with Logos release version.
         good_wine, reason = wine.check_wine_rules(
@@ -285,6 +307,7 @@ class LogosManager:
                 logging.debug(f"Error while stopping Logos processes: {e}.")
         else:
             logging.debug("No Logos processes to stop.")
+        self.piper.stop()
         self.logos_state = State.STOPPED
         # The Logos process has exited, if we wait here it hangs
         # wine.wineserver_wait(self.app)

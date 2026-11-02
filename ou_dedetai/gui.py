@@ -245,6 +245,11 @@ class ControlGui(StatusGui):
         self.actions_button.state(['disabled'])
         s2 = Separator(self, orient='horizontal')
 
+        self.piper_actions = []
+        for value, label in [('install', 'Install Piper'), ('configure', 'Configure Piper'), ('start', 'Start Piper'),
+                             ('stop', 'Stop Piper'), ('disable', 'Disable Piper')]:
+            self.piper_actions.append(Radiobutton(self, text=label, variable=self.actionsvar,
+                                                  value=f'{value}-piper'))
         # Edit config button
         self.config_label = Label(self, text="Edit config file")
         self.config_button = Button(self, text="Edit …")
@@ -302,6 +307,9 @@ class ControlGui(StatusGui):
         row += 1
         self.install_icu_radio.grid(column=1, row=row, sticky='w', pady=2, columnspan=2)
         row += 1
+        for radio in self.piper_actions:
+            radio.grid(column=1, row=row, sticky='w', pady=2, columnspan=2)
+            row += 1
         s2.grid(column=0, row=row, columnspan=3, sticky='we', pady=2)
         row += 1
         self.config_label.grid(column=0, row=row, sticky='w', pady=2)

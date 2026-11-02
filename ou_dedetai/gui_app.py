@@ -36,6 +36,7 @@ from . import installer
 from . import system
 from . import utils
 from . import wine
+from . import piper
 import ou_dedetai
 
 class GuiApp(App):
@@ -491,6 +492,8 @@ class ControlWindow(GuiApp):
         self.gui.install_icu_radio.config(
             command=self.on_action_radio_clicked
         )
+        for radio in self.gui.piper_actions:
+            radio.config(command=self.on_action_radio_clicked)
         self.gui.actions_button.config(command=self.run_action_cmd)
 
         self.gui.loggingstatevar.set('Enable')
@@ -561,7 +564,11 @@ class ControlWindow(GuiApp):
         logging.debug("gui_app.ControlPanel.on_action_radio_clicked START")
         if self.is_installed():
             self.gui.actions_button.state(['!disabled'])
-            if self.gui.actionsvar.get() == 'run-indexing':
+            if self.gui.actionsvar.get().endswith('-piper'):
+                action = self.gui.actionsvar.get().removesuffix('-piper')
+                operation = getattr(piper, action)
+                self.actioncmd = lambda: self.start_thread(operation, self)
+            elif self.gui.actionsvar.get() == 'run-indexing':
                 self.actioncmd = self.run_indexing
             elif self.gui.actionsvar.get() == 'remove-library-catalog':
                 self.actioncmd = self.remove_library_catalog

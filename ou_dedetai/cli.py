@@ -17,6 +17,7 @@ from . import backup
 from . import control
 from . import installer
 from . import wine
+from . import piper
 from . import utils
 
 
@@ -29,6 +30,21 @@ class CLI(App):
         self.input_event = threading.Event()
         self.choice_event = threading.Event()
         self.start_thread(self.user_input_processor)
+
+    def install_piper(self):
+        piper.install(self)
+
+    def configure_piper(self):
+        piper.configure(self)
+
+    def start_piper(self):
+        piper.start(self)
+
+    def stop_piper(self):
+        piper.stop(self)
+
+    def disable_piper(self):
+        piper.disable(self)
 
     def backup(self):
         backup.backup(app=self)

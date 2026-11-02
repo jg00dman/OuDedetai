@@ -107,6 +107,8 @@ def get_parser():
         ),
     )
     cmd = grp.add_mutually_exclusive_group()
+    for name in ('install', 'configure', 'start', 'stop', 'disable'):
+        cmd.add_argument(f'--{name}-piper', action='store_true', help=f'{name.capitalize()} Piper Read Aloud')
     cmd.add_argument(
         '--install-app', action='store_true',
         help='install FaithLife app',
@@ -282,6 +284,7 @@ def parse_args(args, parser) -> Tuple[EphemeralConfiguration, Callable[[Ephemera
         'edit_config',
         'install_dependencies',
         'install_icu',
+        'install_piper', 'configure_piper', 'start_piper', 'stop_piper', 'disable_piper',
         'remove_index_files',
         'uninstall',
         'remove_library_catalog',
@@ -403,6 +406,7 @@ def run(ephemeral_config: EphemeralConfiguration, action: Callable[[EphemeralCon
         'backup',
         'create_shortcuts',
         'install_icu',
+        'install_piper', 'configure_piper', 'start_piper', 'stop_piper', 'disable_piper',
         'remove_index_files',
         'remove_library_catalog',
         'restore',

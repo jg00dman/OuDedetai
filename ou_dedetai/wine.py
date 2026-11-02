@@ -755,6 +755,9 @@ def get_wine_env(app: App, additional_wine_dll_overrides: Optional[str]=None) ->
     if additional_wine_dll_overrides is not None:
         wine_env["WINEDLLOVERRIDES"] += ";" + additional_wine_dll_overrides
 
+    if app.conf.piper_enabled:
+        wine_env["WINEDLLOVERRIDES"] += ";sapi=b"
+
     updated_env = {k: wine_env.get(k) for k in wine_env_defaults.keys()}
     logging.debug(f"Wine env: {updated_env}")
     # Extra safe calling this here, it should be called run run_command anyways

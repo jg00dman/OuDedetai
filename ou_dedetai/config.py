@@ -334,6 +334,9 @@ class PersistentConfiguration:
     # Should we derive this value from wine_binary?
     wine_binary_code: Optional[str] = None
     """This is the type of wine installation used"""
+    piper_enabled: bool = False
+    piper_binary: str = ""
+    piper_model: str = ""
     backup_dir: Optional[str] = None
 
     # Color to use in curses. Either "System", "Logos", "Light", or "Dark"
@@ -380,7 +383,7 @@ class PersistentConfiguration:
         # Now override with values from ENV
         config_env = PersistentConfiguration.from_legacy(LegacyConfiguration.load_from_env()) 
         for k, v in config_env.__dict__.items():
-            if v is not None:
+            if v is not None and k not in ('piper_enabled', 'piper_binary', 'piper_model'):
                 config_dict[k] = v
 
         return PersistentConfiguration(**config_dict)
@@ -605,6 +608,33 @@ class Config:
                 self._write()
         # parameter given should be a string
         return str(getattr(self._raw, parameter))
+
+    @property
+    def piper_enabled(self) -> bool:
+        return self._raw.piper_enabled
+
+    @piper_enabled.setter
+    def piper_enabled(self, value: bool) -> None:
+        self._raw.piper_enabled = value
+        self._write()
+
+    @property
+    def piper_binary(self) -> str:
+        return self._raw.piper_binary
+
+    @piper_binary.setter
+    def piper_binary(self, value: str) -> None:
+        self._raw.piper_binary = value
+        self._write()
+
+    @property
+    def piper_model(self) -> str:
+        return self._raw.piper_model
+
+    @piper_model.setter
+    def piper_model(self, value: str) -> None:
+        self._raw.piper_model = value
+        self._write()
 
     def _write(self) -> None:
         """Writes configuration to file and lets the app know something changed"""
