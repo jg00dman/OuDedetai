@@ -1,6 +1,9 @@
 name: Publish Piper integration beta
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/piper-lifecycle]
+    paths: [.github/workflows/piper-beta.yml]
 permissions:
   contents: read
 jobs:
