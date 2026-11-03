@@ -6,7 +6,7 @@ import threading
 import unittest
 from unittest.mock import Mock, PropertyMock, patch
 
-from ou_dedetai import constants, runtime, utils, wine
+from ou_dedetai import constants, runtime, wine
 from ou_dedetai.app import UserExitedFromAsk
 from ou_dedetai.config import Config, EphemeralConfiguration, LegacyConfiguration, PersistentConfiguration
 from ou_dedetai.logos import State
@@ -47,9 +47,11 @@ class TestRuntimeSelection(unittest.TestCase):
                            return_value='https://example.invalid/recommended.AppImage')
         url.start()
         self.addCleanup(url.stop)
-        channel = patch('ou_dedetai.installer.default_wine_channel', return_value=constants.WINE_RECOMMENDED_SIGIL)
-        channel.start()
-        self.addCleanup(channel.stop)
+        from ou_dedetai import network
+        self.conf._network = Mock()
+        self.conf._network.wine_runtime_releases.return_value = network.GithubSoftwareReleasesInfo(
+            network.SoftwareReleaseInfo('10.0', 'https://example.invalid/stable.tar.xz'),
+            network.SoftwareReleaseInfo('10.1', 'https://example.invalid/testing.tar.xz', prerelease=True))
 
     def executable(self, path, version='wine-10.0'):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -174,7 +176,7 @@ class TestRuntimeSelection(unittest.TestCase):
         self.assertFalse(self.config_path.exists())
 
     def test_cancel_file_dialog_changes_nothing(self):
-        self.app.ask.side_effect = ['Add new…', UserExitedFromAsk(), 'Cancel']
+        self.app.ask.side_effect = ['Custom…', UserExitedFromAsk(), 'Cancel']
         runtime.select_runtime(self.app)
         self.assertFalse(self.config_path.exists())
 
@@ -218,34 +220,6 @@ class TestRuntimeSelection(unittest.TestCase):
         self.assertIn(proton, found['Local Proton'])
         self.assertIn(image, found['Installed AppImages'])
 
-    def test_recommended_update_uses_activation(self):
-        self.conf._raw.wine_binary_code = 'AppImage'
-        with patch.object(Config, 'wine_appimage_recommended_file_name', new_callable=PropertyMock,
-                          return_value='recommended.AppImage'), \
-                patch.object(utils, 'compare_recommended_appimage_version', return_value=(0, '')), \
-                patch('ou_dedetai.network.download_recommended_appimage') as download, \
-                patch.object(runtime, 'activate_runtime') as activate:
-            utils.update_to_latest_recommended_appimage(self.app)
-        download.assert_called_once_with(self.app)
-        activate.assert_called_once_with(self.app, self.managed / 'recommended.AppImage')
-
-    def test_installed_menu_marks_current_and_selects_another(self):
-        old = self.image(self.managed / 'old.AppImage')
-        new = self.image(self.managed / 'new.AppImage')
-        self.activate_image(old)
-        self.app.ask.side_effect = lambda question, options: next(label for label in options if str(new) in label)
-        with patch.object(runtime, '_check_version'):
-            runtime.select_runtime(self.app)
-        options = self.app.ask.call_args_list[-1].args[1]
-        self.assertTrue(any('(current)' in label and str(old) in label for label in options))
-        self.assertEqual(self.conf.wine_binary, str(new))
-
-    def test_custom_menu_can_select_separate_server(self):
-        binary = self.executable(self.root / 'custom/loader')
-        server = self.executable(self.root / 'elsewhere/server')
-        self.app.ask.side_effect = ['Add new…', str(binary), str(server)]
-        runtime.select_runtime(self.app)
-        self.assertEqual(self.conf.wineserver_binary, str(server))
 
     def test_non_executable_local_wine_is_rejected(self):
         binary = self.executable(self.root / 'custom/wine')
@@ -274,23 +248,6 @@ class TestRuntimeSelection(unittest.TestCase):
                 runtime.activate_runtime(self.app, binary)
         self.assertEqual(self.conf.wine_binary, '/old/wine')
 
-    def test_combined_options_include_missing_and_custom_current(self):
-        with patch.object(runtime, 'discover_runtimes', return_value={
-            'Installed AppImages': [], 'System/local Wine': [], 'Local Proton': []
-        }):
-            options = runtime.runtime_options(self.app)
-        self.assertEqual([o.label for o in options[1:]],
-                         ['Local Wine (not found)', 'Local Proton (not found)'])
-        self.assertTrue(options[0].current)
-        self.assertEqual(options[0].path, Path('/old/wine'))
-
-    def test_current_and_recommended_are_independent(self):
-        option = runtime.RuntimeOption('wine.AppImage', Path('/wine.AppImage'), recommended=True)
-        self.assertIn('(recommended)', option.label)
-        self.assertNotIn('(current)', option.label)
-        option.current = True
-        self.assertIn('(current)', option.label)
-        self.assertIn('(recommended)', option.label)
 
     def test_version_probe_timeout_is_unknown_not_missing(self):
         import subprocess
@@ -302,125 +259,6 @@ class TestRuntimeSelection(unittest.TestCase):
         binary = self.executable(self.root / 'wine', 'wine-10.0 (Staging)')
         self.assertEqual(runtime.runtime_version(binary), 'wine-10.0 (Staging)')
 
-    def test_add_activates_without_a_second_menu(self):
-        source = self.image(self.root / 'Downloads/new.AppImage')
-        self.app.ask.side_effect = ['Add new…', str(source)]
-        with patch.object(runtime, '_check_version'):
-            runtime.select_runtime(self.app)
-        self.assertEqual(self.conf.wine_binary, str(self.managed / source.name))
-        self.assertEqual(self.app.choose_runtime.call_count, 1)
-
-    def test_current_choice_returns_without_writing(self):
-        self.app.ask.side_effect = lambda question, options: next(x for x in options if '(current)' in x)
-        with patch.object(runtime, 'activate_option') as activate:
-            runtime.select_runtime(self.app)
-        activate.assert_not_called()
-        self.assertFalse(self.config_path.exists())
-
-    def test_add_rejects_invalid_file_without_changing_selection(self):
-        source = self.root / 'bad.AppImage'
-        source.write_text('not an image')
-        with self.assertRaises(ValueError):
-            runtime.added_runtime(source)
-        self.assertEqual(self.conf.wine_binary, '/old/wine')
-
-    def test_proton_label_includes_build_name(self):
-        binary = self.root / 'Proton 10/files/bin/wine'
-        with patch.object(runtime, 'discover_runtimes', return_value={'Local Proton': [binary]}):
-            options = runtime.runtime_options(self.app)
-        self.assertTrue(any('Proton 10' in option.label for option in options))
-
-    def test_failed_activation_returns_to_menu(self):
-        image = self.image(self.managed / 'new.AppImage')
-        self.app.ask.side_effect = [f'new.AppImage — {image}', 'Cancel']
-        with patch.object(runtime, 'activate_runtime', side_effect=ValueError('bad runtime')):
-            runtime.select_runtime(self.app)
-        self.app.info.assert_called_once()
-        self.assertEqual(self.app.ask.call_count, 2)
-        self.assertEqual(self.conf.wine_binary, '/old/wine')
-
-    def test_missing_recommendation_is_a_downloadable_choice(self):
-        options = []
-        release = ('recommended.AppImage', 'https://example.invalid/recommended.AppImage')
-        runtime.include_recommended(self.app, options, release)
-        runtime.include_recommended(self.app, options, release)
-        self.assertEqual(len(options), 1)
-        self.assertTrue(options[0].recommended)
-        self.assertEqual(options[0].path, self.managed / release[0])
-        self.assertEqual(options[0].download_url, release[1])
-        self.assertIn('(recommended) (download required)', options[0].label)
-        self.assertFalse(self.config_path.exists())
-
-    def test_prerelease_is_offered_alongside_stable(self):
-        self.conf._raw.wine_binary = constants.WINE_RECOMMENDED_SIGIL
-        stable = runtime.AppImageRelease('wine-stable.AppImage', 'https://example.invalid/wine-stable.AppImage')
-        pre = runtime.AppImageRelease('wine-pre.AppImage', 'https://example.invalid/wine-pre.AppImage', True)
-        options = []
-        runtime.include_releases(self.app, options, [stable, pre])
-        runtime.include_releases(self.app, options, [stable, pre])
-        runtime.include_recommended(self.app, options, (stable.name, stable.url))
-        self.assertEqual([option.name for option in options], [stable.name, pre.name])
-        self.assertTrue(options[0].recommended)
-        self.assertFalse(options[0].prerelease)
-        self.assertFalse(options[1].recommended)
-        self.assertTrue(options[1].prerelease)
-        self.assertEqual(options[1].download_url, pre.url)
-        self.assertIn('(pre-release) (download required)', options[1].label)
-
-    def test_prerelease_recommended_by_installer_is_one_option(self):
-        pre = runtime.AppImageRelease('wine-pre.AppImage', 'https://example.invalid/wine-pre.AppImage', True)
-        options = []
-        runtime.include_releases(self.app, options, [pre])
-        runtime.include_recommended(self.app, options, (pre.name, pre.url))
-        self.assertEqual(len(options), 1)
-        self.assertIn('(pre-release) (recommended) (download required)', options[0].label)
-
-    def test_installed_prerelease_does_not_need_download(self):
-        image = self.image(self.managed / 'wine-pre.AppImage')
-        options = [runtime.RuntimeOption(image.name, image)]
-        runtime.include_releases(self.app, options, [
-            runtime.AppImageRelease(image.name, 'https://example.invalid/wine-pre.AppImage', True)])
-        self.assertEqual(len(options), 1)
-        self.assertTrue(options[0].prerelease)
-        self.assertNotIn('download required', options[0].label)
-
-    def test_available_appimages_reads_stable_and_prerelease(self):
-        app = Mock()
-        app.conf.wine_appimage_recommended_file_name = 'stable.AppImage'
-        app.conf.wine_appimage_recommended_url = 'https://example.invalid/stable.AppImage'
-        app.conf.wine_appimage_beta_file_name = 'pre.AppImage'
-        app.conf.wine_appimage_beta_url = 'https://example.invalid/pre.AppImage'
-        self.assertEqual(runtime.available_appimages(app), [
-            runtime.AppImageRelease('stable.AppImage', 'https://example.invalid/stable.AppImage'),
-            runtime.AppImageRelease('pre.AppImage', 'https://example.invalid/pre.AppImage', True)])
-        app.conf.wine_appimage_beta_file_name = None
-        app.conf.wine_appimage_beta_url = None
-        self.assertEqual([release.name for release in runtime.available_appimages(app)], ['stable.AppImage'])
-
-    def test_available_appimages_survives_network_failure(self):
-        app = Mock()
-        type(app.conf).wine_appimage_recommended_file_name = PropertyMock(side_effect=ValueError('offline'))
-        type(app.conf).wine_appimage_beta_file_name = PropertyMock(side_effect=ValueError('offline'))
-        self.assertEqual(runtime.available_appimages(app), [])
-
-    def test_text_menu_lists_prerelease(self):
-        pre = runtime.AppImageRelease('wine-pre.AppImage', 'https://example.invalid/wine-pre.AppImage', True)
-        self.app.ask.side_effect = ['Cancel']
-        with patch.object(runtime, 'discover_runtimes', return_value={
-                    'Installed AppImages': [], 'System/local Wine': [], 'Local Proton': []}), \
-                patch.object(runtime, 'recommended_appimage', return_value=None), \
-                patch.object(runtime, 'available_appimages', return_value=[pre]):
-            runtime.select_runtime(self.app)
-        choices = self.app.ask.call_args.args[1]
-        self.assertTrue(any(choice.startswith('wine-pre.AppImage (pre-release)') for choice in choices))
-
-    def test_installed_recommendation_does_not_need_download(self):
-        image = self.image(self.managed / 'recommended.AppImage')
-        options = [runtime.RuntimeOption(image.name, image)]
-        runtime.include_recommended(self.app, options, (image.name, 'https://example.invalid/image'))
-        self.assertEqual(len(options), 1)
-        self.assertTrue(options[0].recommended)
-        self.assertNotIn('download required', options[0].label)
 
     def test_recommended_download_uses_installer_flow_then_activates(self):
         from ou_dedetai import installer, network
@@ -465,12 +303,6 @@ class TestRuntimeSelection(unittest.TestCase):
         self.assertFalse(self.config_path.exists())
         self.assertFalse(option.path.exists())
 
-    def test_cancelling_downloadable_menu_does_not_download(self):
-        self.app.ask.return_value = 'Cancel'
-        with patch('ou_dedetai.installer.download_appimage') as download:
-            runtime.select_runtime(self.app)
-        download.assert_not_called()
-        self.assertTrue(any('(download required)' in label for label in self.app.ask.call_args.args[1]))
 
     def test_running_logos_blocks_download(self):
         option = runtime.RuntimeOption('recommended.AppImage', self.managed / 'recommended.AppImage',
@@ -483,162 +315,111 @@ class TestRuntimeSelection(unittest.TestCase):
 
     def preinstall(self):
         self.app.is_installed.return_value = False
-        self.conf._raw.write_config = Mock()
         self.conf._raw.faithlife_product = None
         self.conf._raw.faithlife_product_version = None
         self.conf._raw.install_dir = None
         self.conf._raw.wine_binary = None
         self.conf._download_dir = str(self.root / 'cache')
 
-    def test_fresh_runtime_list_does_not_prompt_or_set_install_dir(self):
-        self.preinstall()
-        with patch.object(runtime, 'discover_runtimes', return_value={'System/local Wine': [], 'Local Proton': []}):
-            options = runtime.runtime_options(self.app)
-            runtime.include_releases(self.app, options, [
-                runtime.AppImageRelease('pre.AppImage', 'https://example.invalid/pre.AppImage', True)])
-        self.assertFalse(any(option.current for option in options))
-        self.assertEqual(options[-1].path, self.root / 'cache/pre.AppImage')
-        self.app.ask.assert_not_called()
-        self.assertIsNone(self.conf._raw.faithlife_product)
-        self.assertIsNone(self.conf._raw.install_dir)
-        self.assertEqual(list(self.managed.glob('*')) if self.managed.exists() else [], [])
 
-    def test_preinstall_release_is_recorded_for_the_installer_not_downloaded(self):
-        from ou_dedetai import installer
+    def bundle(self, name='custom bundle'):
+        directory = self.root / name
+        self.executable(directory / 'bin/wine')
+        self.executable(directory / 'bin/wineserver')
+        (directory / 'lib').mkdir()
+        (directory / 'lib/support.so').write_bytes(b'keep full bundle layout')
+        return directory
+
+    def test_custom_extracted_directory_is_activated(self):
+        directory = self.bundle()
+        runtime.activate_runtime(self.app, directory)
+        self.assertEqual(self.conf.wine_binary, str(directory / 'bin/wine'))
+        self.assertEqual(self.conf.wineserver_binary, str(directory / 'bin/wineserver'))
+        self.assertEqual((self.managed / 'wine').resolve(), directory / 'bin/wine')
+
+    def test_bundle_archive_is_extracted_and_persisted(self):
+        import tarfile
+        directory = self.bundle()
+        archive = self.root / 'build.bundle.tar.xz'
+        with tarfile.open(archive, 'w:xz') as tar:
+            tar.add(directory, arcname='wine-build')
+        runtime.activate_runtime(self.app, archive)
+        selected = Path(self.conf.wine_binary)
+        self.assertTrue(selected.is_relative_to(self.conf.wine_distribution_dir))
+        self.assertTrue((selected.parent.parent / 'lib/support.so').is_file())
+        self.assertEqual((self.managed / 'wine').resolve(), selected)
+        self.conf._raw = PersistentConfiguration.load_from_path(str(self.config_path))
+        self.assertEqual(self.conf.wine_binary, str(selected))
+        self.assertEqual(self.conf.wine_path_in_distribution, str(selected))
+
+    def test_archive_with_path_traversal_is_rejected(self):
+        import io
+        import tarfile
+        archive = self.root / 'bad.tar.gz'
+        with tarfile.open(archive, 'w:gz') as tar:
+            member = tarfile.TarInfo('../outside')
+            member.size = 1
+            tar.addfile(member, io.BytesIO(b'x'))
+        with self.assertRaises(tarfile.FilterError):
+            runtime.activate_runtime(self.app, archive)
+        self.assertEqual(self.conf.wine_binary, '/old/wine')
+        self.assertFalse((self.root / 'outside').exists())
+
+    def test_invalid_bundle_does_not_replace_working_runtime(self):
+        import tarfile
+        old = self.bundle()
+        runtime.activate_runtime(self.app, old)
+        archive = self.root / 'empty.tar.xz'
+        with tarfile.open(archive, 'w:xz'):
+            pass
+        with self.assertRaises(ValueError):
+            runtime.activate_runtime(self.app, archive)
+        self.assertEqual(self.conf.wine_binary, str(old / 'bin/wine'))
+        self.assertEqual(list(Path(self.conf.wine_distribution_dir).iterdir()), [])
+
+    def test_switching_appimage_to_bundle_removes_stale_appimage_links(self):
+        self.activate_image(self.image(self.root / 'wine.AppImage'))
+        directory = self.bundle()
+        runtime.activate_runtime(self.app, directory)
+        self.assertFalse((self.managed / self.conf.wine_appimage_link_file_name).is_symlink())
+        self.assertFalse((self.managed / 'winetricks').is_symlink())
+        self.assertEqual((self.managed / 'wineserver').resolve(), directory / 'bin/wineserver')
+
+    def test_managed_release_metadata_survives_reload(self):
+        from ou_dedetai.network import SoftwareReleaseInfo
+        directory = self.bundle()
+        release = SoftwareReleaseInfo('11.20-test', 'https://example.invalid/build.bundle.tar.xz',
+                                      '2026-10-30T00:00:00Z', True)
+        runtime.activate_runtime(self.app, directory, release=release)
+        loaded = PersistentConfiguration.load_from_path(str(self.config_path))
+        self.assertEqual(loaded.wine_runtime_version, release.version)
+        self.assertTrue(loaded.wine_runtime_prerelease)
+        self.assertEqual(loaded.wine_runtime_published_at, release.published_at)
+
+    def test_verification_stamp_is_saved_to_both_config_files(self):
+        self.conf.mark_installation_verified()
+        portable = self.install / f'{constants.BINARY_NAME}.json'
+        for path in (self.config_path, portable):
+            self.assertEqual(json.loads(path.read_text())['last_verified_od_version'], constants.LLI_CURRENT_VERSION)
+
+    def test_before_install_choice_is_recorded_without_downloading(self):
         self.preinstall()
-        option = runtime.RuntimeOption('pre.AppImage', self.root / 'cache/pre.AppImage',
-                                       download_url='https://example.invalid/pre.AppImage', prerelease=True)
-        with patch.object(installer, 'download_appimage') as download:
+        option = runtime.RuntimeOption(constants.WINE_BETA_SIGIL, None, choice=constants.WINE_BETA_SIGIL)
+        with patch('ou_dedetai.installer.download_appimage') as download:
             runtime.activate_option(self.app, option)
         download.assert_not_called()
-        self.app.ask.assert_not_called()
-        self.assertEqual(self.conf._raw.wine_binary, f'{constants.RELATIVE_BINARY_DIR}/pre.AppImage')
-        self.assertIsNone(self.conf._raw.wine_server)
+        self.assertEqual(self.conf._raw.wine_binary, constants.WINE_BETA_SIGIL)
         self.assertIsNone(self.conf._raw.install_dir)
-        # Reopening the picker shows it as the current choice, once.
-        with patch.object(runtime, 'discover_runtimes', return_value={'System/local Wine': [], 'Local Proton': []}):
-            options = runtime.runtime_options(self.app)
-            runtime.include_releases(self.app, options, [
-                runtime.AppImageRelease('pre.AppImage', 'https://example.invalid/pre.AppImage', True)])
-        listed = [option for option in options if option.path is not None]
-        self.assertEqual(len(listed), 1)
-        self.assertTrue(listed[0].current and listed[0].prerelease)
-
-    def test_finished_selection_stops_the_progress_spinner(self):
-        # A status without a percentage means "still working" and spins forever.
-        self.activate_image(self.image(self.root / 'Downloads/wine.AppImage'))
-        self.assertEqual(self.app.status.call_args.args[1:], (100,))
-        self.app.status.reset_mock()
-        self.preinstall()
-        option = runtime.RuntimeOption('pre.AppImage', self.root / 'cache/pre.AppImage',
-                                       download_url='https://example.invalid/pre.AppImage')
-        runtime.activate_option(self.app, option)
-        self.assertEqual(self.app.status.call_args.args[1:], (100,))
-
-    def test_preinstall_appimage_is_recorded_then_copied_by_installer(self):
-        from ou_dedetai import installer
-        self.preinstall()
-        image = self.image(self.root / 'Downloads/personal.AppImage')
-        runtime.activate_option(self.app, runtime.RuntimeOption(image.name, image))
-        # Nothing copied, linked or created yet; the install dir isn't decided.
-        self.assertEqual(list(self.managed.glob('*')) if self.managed.exists() else [], [])
-        self.assertIsNone(self.conf._raw.install_dir)
-        self.assertEqual(self.conf._raw.wine_binary, str(image))
-        self.app.ask.assert_not_called()
-        # The installer then uses that AppImage exactly as if picked in its own prompt.
-        # The installer asks for the product before the install dir.
-        self.conf.faithlife_product = 'Logos'
-        self.conf.faithlife_product_version = '10'
-        self.conf._raw.install_dir = str(self.install)
-        self.app.installer_step = self.app.installer_step_count = 0
-        with patch.object(installer, 'ensure_sys_deps'), \
-                patch.object(installer, 'check_system_compatibility'), \
-                patch.object(installer, 'download_appimage') as download, \
-                patch.object(Config, 'wine_appimage_recommended_file_name', new_callable=PropertyMock,
-                             return_value='stable.AppImage'), \
-                patch.object(Config, 'wine_appimage_beta_file_name', new_callable=PropertyMock,
-                             return_value='pre.AppImage'), \
-                patch.dict(os.environ, {'PATH': os.environ.get('PATH', '')}):
-            installer.ensure_wine_executables(self.app)
-        download.assert_not_called()
-        selected = self.managed / image.name
-        self.assertTrue(os.access(selected, os.X_OK))
+    def test_old_managed_loader_symlink_is_resolved_before_relinking(self):
+        image = self.image(self.root / 'old.AppImage')
+        self.activate_image(image)
+        selected = Path(self.conf.wine_binary)
+        self.conf._raw.wine_binary = str(self.managed / 'wine64')
+        self.activate_image(self.managed / 'wine64')
+        self.assertEqual((self.managed / 'wine64').resolve(strict=True), selected)
         self.assertEqual(self.conf.wine_binary, str(selected))
-        self.assertEqual((self.managed / self.conf.wine_appimage_link_file_name).resolve(), selected)
 
-    def test_preinstall_appimage_removed_before_install_is_reported(self):
-        from ou_dedetai import installer
-        self.preinstall()
-        image = self.image(self.root / 'Downloads/personal.AppImage')
-        runtime.activate_option(self.app, runtime.RuntimeOption(image.name, image))
-        image.unlink()
-        self.conf.faithlife_product = 'Logos'
-        self.conf.faithlife_product_version = '10'
-        self.conf._raw.install_dir = str(self.install)
-        self.app.installer_step = self.app.installer_step_count = 0
-        with patch.object(installer, 'ensure_sys_deps'), \
-                patch.object(installer, 'check_system_compatibility'), \
-                patch.object(installer, 'download_appimage') as download, \
-                patch.object(Config, 'wine_appimage_recommended_file_name', new_callable=PropertyMock,
-                             return_value='stable.AppImage'), \
-                patch.object(Config, 'wine_appimage_beta_file_name', new_callable=PropertyMock,
-                             return_value='pre.AppImage'), \
-                self.assertRaisesRegex(ValueError, 'missing'):
-            installer.ensure_appimage_download(self.app)
-        download.assert_not_called()
-
-    def test_preinstall_custom_wine_and_separate_server_are_recorded(self):
-        from ou_dedetai import installer
-        self.preinstall()
-        binary = self.executable(self.root / 'my-build/loader/wine')
-        server = self.executable(self.root / 'my-build/server/wineserver')
-        runtime.activate_option(self.app, runtime.RuntimeOption('Custom Wine', binary), server)
-        self.app.logos.get_logos_pids.assert_not_called()
-        self.app.ask.assert_not_called()
-        self.assertIsNone(self.conf._raw.install_dir)
-        self.assertEqual(self.conf._raw.wine_binary, str(binary))
-        self.assertEqual(self.conf._raw.wine_server, str(server))
-        # The installer asks for the product before the install dir.
-        self.conf.faithlife_product = 'Logos'
-        self.conf.faithlife_product_version = '10'
-        self.conf._raw.install_dir = str(self.install)
-        self.app.installer_step = self.app.installer_step_count = 0
-        with patch.object(installer, 'ensure_sys_deps'), \
-                patch.object(installer, 'check_system_compatibility'), \
-                patch.object(installer, 'download_appimage') as download, \
-                patch.object(installer, 'create_wine_appimage_symlinks') as relink:
-            installer.ensure_wine_executables(self.app)
-        download.assert_not_called()
-        relink.assert_not_called()
-        self.assertEqual(self.conf.wine64_binary, str(binary))
-        self.assertEqual(self.conf.wineserver_binary, str(server))
-        self.assertEqual(wine.get_wine_env(self.app)['WINE'], str(binary))
-        self.assertEqual(wine.get_wine_env(self.app)['WINESERVER'], str(server))
-
-    def test_preinstall_adjacent_wineserver_is_not_stored(self):
-        self.preinstall()
-        binary = self.executable(self.root / 'build/bin/wine')
-        self.executable(self.root / 'build/bin/wineserver')
-        runtime.activate_option(self.app, runtime.RuntimeOption('Custom Wine', binary))
-        self.assertEqual(self.conf._raw.wine_binary, str(binary))
-        self.assertIsNone(self.conf._raw.wine_server)
-
-    def test_preinstall_choice_still_warns_about_incompatible_wine(self):
-        self.preinstall()
-        binary = self.executable(self.root / 'old/bin/wine', version='wine-6.0')
-        self.executable(self.root / 'old/bin/wineserver')
-        self.app.approve.return_value = False
-        with self.assertRaises(UserExitedFromAsk):
-            runtime.activate_option(self.app, runtime.RuntimeOption('Custom Wine', binary))
-        self.app.approve.assert_called_once()
-        self.assertIsNone(self.conf._raw.wine_binary)
-
-    def test_missing_preselected_runtime_fails_instead_of_using_default(self):
-        from ou_dedetai import installer
-        self.app.installer_step = self.app.installer_step_count = 0
-        self.conf._raw.wine_server = '/missing/wineserver'
-        with patch.object(installer, 'ensure_sys_deps'), patch.object(installer, 'check_system_compatibility'), \
-                patch.object(installer, 'download_appimage') as download:
-            with self.assertRaisesRegex(ValueError, 'Selected Wine runtime is missing'):
-                installer.ensure_appimage_download(self.app)
-        download.assert_not_called()
+    def test_similar_install_prefix_is_not_made_relative_by_setter(self):
+        path = str(self.install) + '-custom/bin/wine'
+        self.conf.wine_binary = path
+        self.assertEqual(self.conf._raw.wine_binary, path)

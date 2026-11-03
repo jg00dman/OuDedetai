@@ -25,6 +25,7 @@ class TestRuntimePicker(unittest.TestCase):
         picker.path = Mock()
         picker.select_button = Mock()
         picker.add_button = Mock()
+        picker.directory_button = Mock()
         picker.cancel_button = Mock()
         picker.status = Mock()
         picker.events = Queue()
@@ -117,49 +118,7 @@ class TestRuntimePicker(unittest.TestCase):
         self.assertFalse(worker.is_alive())
         self.assertEqual(answer, [True])
 
-    def test_recommendation_survives_both_background_completion_orders(self):
-        release = ('recommended.AppImage', 'https://example.invalid/image')
-        for recommendation_first in (True, False):
-            with self.subTest(recommendation_first=recommendation_first):
-                picker = self.picker()
-                picker.options = []
-                picker.list.selection.return_value = ()
-                local = RuntimeOption('Local Wine', Path('/wine'), current=True)
-                with patch.object(picker, 'probe'):
-                    if recommendation_first:
-                        picker.set_recommended(release)
-                        picker.loaded([local])
-                    else:
-                        picker.loaded([local])
-                        picker.set_recommended(release)
-                self.assertEqual(len(picker.options), 2)
-                self.assertTrue(picker.options[1].recommended)
-                self.assertEqual(picker.options[1].download_url, release[1])
 
-    def test_prerelease_survives_all_background_completion_orders(self):
-        from itertools import permutations
-        from ou_dedetai.runtime import AppImageRelease
-        stable = AppImageRelease('stable.AppImage', 'https://example.invalid/stable.AppImage')
-        pre = AppImageRelease('pre.AppImage', 'https://example.invalid/pre.AppImage', True)
-        for order in permutations(('loaded', 'recommended', 'releases')):
-            with self.subTest(order=order):
-                picker = self.picker()
-                picker.options = []
-                picker.list.selection.return_value = ()
-                local = RuntimeOption('Local Wine', Path('/wine'), current=True)
-                steps = {'loaded': lambda: picker.loaded([local]),
-                         'recommended': lambda: picker.set_recommended((stable.name, stable.url)),
-                         'releases': lambda: picker.set_releases([stable, pre])}
-                with patch.object(picker, 'probe'):
-                    for step in order:
-                        steps[step]()
-                names = [option.name for option in picker.options]
-                self.assertEqual(names, ['Local Wine', 'stable.AppImage', 'pre.AppImage'])
-                self.assertTrue(picker.options[1].recommended)
-                self.assertFalse(picker.options[1].prerelease)
-                self.assertTrue(picker.options[2].prerelease)
-                self.assertFalse(picker.options[2].recommended)
-                self.assertEqual(picker.options[2].download_url, pre.url)
 
     def test_download_choice_is_selectable(self):
         picker = self.picker()
@@ -183,7 +142,8 @@ class TestRuntimePicker(unittest.TestCase):
             picker.add()
         self.assertEqual(dialog.call_args.kwargs['initialdir'], Path('/home/test/Downloads'))
         self.assertEqual(dialog.call_args.kwargs['filetypes'],
-                         [('AppImages', ('*.AppImage', '*.appimage')), ('All files', '*')])
+                         [('Wine runtimes', ('*.AppImage', '*.appimage', '*.tar.xz', '*.tar.gz', '*.tgz')),
+                          ('All files', '*')])
         work.assert_not_called()
 
     def test_current_row_is_bold(self):

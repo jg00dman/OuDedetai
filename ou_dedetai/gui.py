@@ -266,6 +266,7 @@ class ControlGui(StatusGui):
         # in order for tkinker to know how large to draw it
         self.update_lli_label = Label(self, text=f"Update {constants.APP_NAME}\n\n")
         self.update_lli_button = Button(self, text="Update")
+        self.check_updates_button = Button(self, text="Check")
         # AppImage buttons
         self.latest_appimage_label = Label(
             self,
@@ -273,7 +274,7 @@ class ControlGui(StatusGui):
         )
         self.latest_appimage_button = Button(self, text="Run")
         self.set_appimage_label = Label(self, text="Wine runtime")
-        self.set_appimage_button = Button(self, text="Select…")
+        self.set_appimage_button = Button(self, text="Set Runtime")
         # App logging toggle
         self.loggingstatevar = StringVar(value='Enable')
         self.logging_label = Label(self, text="Toggle app logging")
@@ -313,8 +314,7 @@ class ControlGui(StatusGui):
         self.deps_label.grid(column=0, row=row, sticky='w', pady=2)
         self.deps_button.grid(column=1, row=row, sticky='w', pady=2)
         row += 1
-        self.update_product_label.grid(column=0, row=row, sticky='w', pady=2)
-        self.update_product_button.grid(column=1, row=row, sticky='w', pady=2)
+        # Product and runtime updates are handled by the existing OD Update button.
         # row += 1
         # self.backups_label.grid(column=0, row=row, sticky='w', pady=2)
         # self.backup_button.grid(column=1, row=row, sticky='w', pady=2)
@@ -322,9 +322,9 @@ class ControlGui(StatusGui):
         row += 1
         self.update_lli_label.grid(column=0, row=row, sticky='w', pady=2)
         self.update_lli_button.grid(column=1, row=row, sticky='w', pady=2)
+        self.check_updates_button.grid(column=2, row=row, sticky='w', padx=4, pady=2)
         row += 1
-        self.latest_appimage_label.grid(column=0, row=row, sticky='w', pady=2)
-        self.latest_appimage_button.grid(column=1, row=row, sticky='w', pady=2)
+
         row += 1
         self.set_appimage_label.grid(column=0, row=row, sticky='w', pady=2)
         self.set_appimage_button.grid(column=1, row=row, sticky='w', pady=2)

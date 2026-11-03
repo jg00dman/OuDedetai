@@ -76,6 +76,7 @@ DEFAULT_APP_LOG_PATH = os.path.expanduser(f"{STATE_DIR}/{BINARY_NAME}.log")
 NETWORK_CACHE_PATH = f"{CACHE_DIR}/network.json"
 
 RELATIVE_BINARY_DIR = "data/bin"
+RELATIVE_WINE_DISTRIBUTION_DIR = f"{RELATIVE_BINARY_DIR}/wine-distribution"
 
 DEFAULT_WINEDEBUG = "err+all"
 LEGACY_CONFIG_FILES = [
@@ -95,12 +96,23 @@ LOGOS_GRAY = '#E7E7E7'
 LOGOS_WHITE = '#FCFCFC'
 PID_FILE = f'/tmp/{BINARY_NAME}.pid'
 
-# Wine choices offered by the installer, stored in the config until the
-# installer resolves them to a downloaded AppImage.
-WINE_RECOMMENDED_SIGIL = "Latest release (recommended)"
-WINE_BETA_SIGIL = "Pre-release"
-# Earlier names for the same choices, still accepted from existing configs.
-LEGACY_WINE_SIGILS = {"Recommended": WINE_RECOMMENDED_SIGIL, "Experimental (AKA Beta)": WINE_BETA_SIGIL}
+WINE_RECOMMENDED_TARBALL_SIGIL = "Latest release bundle (recommended)"
+WINE_TESTING_TARBALL_SIGIL = "Latest pre-release bundle (testing)"
+WINE_RECOMMENDED_APPIMAGE_SIGIL = "Latest release AppImage"
+WINE_TESTING_APPIMAGE_SIGIL = "Latest pre-release AppImage (testing)"
+WINE_RECOMMENDED_SIGIL = WINE_RECOMMENDED_TARBALL_SIGIL
+WINE_BETA_SIGIL = WINE_TESTING_TARBALL_SIGIL
+WINE_UNTESTED_STABLE_APPIMAGE_SIGIL = "Latest Appimage from wine stable (untested)"
+WINE_UNTESTED_STAGING_APPIMAGE_SIGIL = "Latest Appimage from wine staging (untested)"
+WINE_UNTESTED_DEVELOPMENT_APPIMAGE_SIGIL = "Latest Appimage from wine development (untested)"
+LEGACY_WINE_SIGILS = {
+    "Recommended": WINE_RECOMMENDED_SIGIL,
+    "Recommended Bundled": WINE_RECOMMENDED_SIGIL,
+    "Recommended Appimage": WINE_RECOMMENDED_APPIMAGE_SIGIL,
+    "Latest release (recommended)": WINE_RECOMMENDED_SIGIL,
+    "Experimental (AKA Beta)": WINE_BETA_SIGIL,
+    "Pre-release": WINE_BETA_SIGIL,
+}
 
 FAITHLIFE_PRODUCTS = ["Logos", "Verbum"]
 FAITHLIFE_PRODUCT_VERSIONS = ["10"] # This used to include 9

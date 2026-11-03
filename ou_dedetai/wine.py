@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 import logging
 import os
@@ -14,6 +15,7 @@ from ou_dedetai.app import App
 from . import network
 from . import system
 from . import utils
+
 
 def check_wineserver(app: App) -> bool:
     # FIXME: if the wine version changes, we may need to restart the wineserver
@@ -253,9 +255,40 @@ def initializeWineBottle(wine64_binary: str, app: App):
     )
 
 
+def get_win_version(app: App, exe: str) -> Optional[str]:
+    if exe == "logos":
+        process = run_wine_completed_process(
+            app, app.conf.wine_binary, exe="winecfg", exe_args=["/v"]
+        )
+        if process.returncode == 0:
+            return (process.stdout or process.stderr).strip() or None
+        return None
+
+    if exe == "indexer":
+        key = (
+            f"HKEY_CURRENT_USER\\Software\\Wine\\AppDefaults\\"
+            f"{app.conf.faithlife_product}Indexer.exe"
+        )
+        process = run_wine_completed_process(
+            app, app.conf.wine_binary, exe="reg.exe",
+            exe_args=["query", key, "/v", "Version"],
+        )
+        if process.returncode == 0:
+            match = re.search(
+                r"^\s*Version\s+REG_SZ\s+(\S+)\s*$",
+                process.stdout, re.MULTILINE,
+            )
+            if match:
+                return match.group(1)
+
+        return get_win_version(app, "logos")
+
+    raise ValueError(f"Unknown executable: {exe}")
+
+
 def set_win_version(app: App, exe: str, windows_version: str):
     if exe == "logos":
-        # This operation is equivilent to f"winetricks -q settings {windows_version}"
+        # This operation is equivalent to f"winetricks -q settings {windows_version}"
         # but faster
         run_wine_during_install(
             app,
@@ -317,9 +350,9 @@ def wine_reg_query(app: App, key_name: str, value_name: str) -> Optional[str]:
                 continue
             if line.strip() == key_name:
                 continue
-            if line.lstrip().startswith(value_name) and "REG_SZ" in line:
-                # This is the line in question
-                return line.split(value_name)[1].split("REG_SZ")[1].strip()
+            match = re.match(r"\s*" + re.escape(value_name) + r"\s+REG_\w+\s+(.*)", line)
+            if match:
+                return match.group(1).strip()
         logging.warning(f"Failed to parse the registry query: {process.stdout.rstrip()}") 
         return None
     else:
@@ -347,7 +380,7 @@ def wine_reg_install(app: App, name: str, reg_text: str, wine64_binary: str):
             wineserver_wait(app)
         except subprocess.CalledProcessError:
             failed = "Failed to install reg file"
-            logging.exception(f"{failed}. {process=}")
+            logging.exception(f"{failed}")
             app.exit(f"{failed}: {reg_file}")
         finally:
             reg_file.unlink()
@@ -361,6 +394,34 @@ def disable_winemenubuilder(app: App, wine64_binary: str):
 "winemenubuilder.exe"=""
 '''
     wine_reg_install(app, name, reg_text, wine64_binary)
+
+
+def get_renderer(app: App) -> Optional[str]:
+    """Get the configured Wine Direct3D renderer."""
+    user_reg = Path(app.conf.wine_prefix) / "user.reg"
+    if not user_reg.is_file():
+        logging.debug("Wine user.reg not found: %s", user_reg)
+        return None
+
+    try:
+        contents = user_reg.read_text()
+        section = re.search(
+            r'^\[Software\\\\Wine\\\\Direct3D\].*?(?=^\[|\Z)',
+            contents,
+            re.MULTILINE | re.DOTALL | re.IGNORECASE,
+        )
+        if section:
+            renderer = re.search(
+                r'^"renderer"="([^"]+)"',
+                section.group(),
+                re.MULTILINE | re.IGNORECASE,
+            )
+            if renderer:
+                return renderer.group(1).lower()
+    except OSError:
+        logging.exception("Failed to read Wine renderer configuration")
+
+    return None
 
 
 def set_renderer(app: App, wine64_binary: str, value: str):
@@ -389,6 +450,60 @@ def set_fontsmoothing_to_rgb(app: App, wine64_binary: str):
 "FontSmoothingGamma"=dword:00000578
 "FontSmoothingOrientation"=dword:00000001
 "FontSmoothingType"=dword:00000002
+'''
+    wine_reg_install(app, name, reg_text, wine64_binary)
+
+
+# Font families Logos expects to exist on every Windows install. Its print preview
+# crashes when it can't find them (null typeface while building headers/footers).
+# Wine's DirectWrite reads HKCU\Software\Wine\Fonts\Replacements and, for each
+# missing family, adds one under that name backed by the first listed font that is
+# installed. Real fonts with these names (e.g. from ttf-mscorefonts-installer) win.
+FONT_REPLACEMENTS: dict[str, list[str]] = {
+    "Segoe UI": ["Selawik", "Noto Sans", "Liberation Sans", "DejaVu Sans"],
+    "Times New Roman": ["Liberation Serif", "Tinos", "Nimbus Roman"],
+    "Courier New": ["Liberation Mono", "Cousine", "Nimbus Mono PS"],
+    "Microsoft Sans Serif": ["Liberation Sans", "Arimo", "Nimbus Sans"],
+    "Calibri": ["Carlito", "Liberation Sans", "Arimo"],
+}
+
+
+def set_font_replacements(app: App, wine64_binary: str, *, preserve_existing: bool = False):
+    key = "HKCU\\Software\\Wine\\Fonts\\Replacements"
+    for family, replacements in FONT_REPLACEMENTS.items():
+        if preserve_existing and wine_reg_query(app, key, family) is not None:
+            continue
+        # wine's reg.exe splits REG_MULTI_SZ data on a literal "\0"
+        process = run_wine_during_install(
+            app,
+            wine64_binary,
+            exe='reg',
+            exe_args=[
+                'add', key,
+                '/v', family,
+                '/t', 'REG_MULTI_SZ',
+                '/d', "\\0".join(replacements),
+                '/f',
+            ]
+        )
+        if process is None:
+            app.exit(f"Failed to spawn command to set font replacement for {family}")
+    wineserver_wait(app)
+
+
+def configure_printing(app: App, wine64_binary: str):
+    # WPF prints through the XPS Print Document Package API whenever it thinks it is
+    # available, which Wine doesn't implement, so printing fails. This WPF switch
+    # makes it fall back to GDI (wineps -> CUPS). xpsprint is disabled so WPF doesn't
+    # pick the StartXpsPrintJob path either; Wine only has stubs for it.
+    name = 'configure-printing.reg'
+    reg_text = r'''REGEDIT4
+
+[HKEY_CURRENT_USER\Software\Microsoft\.NETFramework\Windows Presentation Foundation\Printing]
+"DisableXPSOMPrinting"=dword:00000001
+
+[HKEY_CURRENT_USER\Software\Wine\DllOverrides]
+"xpsprint"=""
 '''
     wine_reg_install(app, name, reg_text, wine64_binary)
 
@@ -756,6 +871,27 @@ def get_wine_env(app: App, additional_wine_dll_overrides: Optional[str]=None) ->
         wine_env["WINEDLLOVERRIDES"] += ";" + additional_wine_dll_overrides
 
     updated_env = {k: wine_env.get(k) for k in wine_env_defaults.keys()}
+
     logging.debug(f"Wine env: {updated_env}")
     # Extra safe calling this here, it should be called run run_command anyways
     return system.fix_ld_library_path(wine_env)
+
+
+def setup_wine(app: App):
+    from ou_dedetai import runtime
+    choice = app.conf.wine_binary
+    release: network.SoftwareReleaseInfo | None
+    if choice in runtime.COMMUNITY_CHOICES or choice in runtime.UPSTREAM_CHOICES:
+        release = runtime.release_for_choice(app, choice)
+        from ou_dedetai.installer import download_appimage
+        selected = download_appimage(app, Path(release.download_url).name, release.download_url)
+        runtime.activate_runtime(app, selected, release=release,
+                                 prefer_bundle=runtime.COMMUNITY_CHOICES.get(choice, ('', False))[0] == 'bundle')
+    else:
+        raw = app.conf._raw
+        release = (network.SoftwareReleaseInfo(raw.wine_runtime_version, raw.wine_runtime_url,
+                   raw.wine_runtime_published_at or "", raw.wine_runtime_prerelease)
+                   if raw.wine_runtime_version and raw.wine_runtime_url else None)
+        runtime.activate_runtime(app, Path(choice), Path(app.conf.wineserver_binary)
+                                 if raw.wine_server else None, release=release,
+                                 prefer_bundle=raw.wine_binary_code == 'BundleFallback')

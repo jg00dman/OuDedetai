@@ -453,15 +453,9 @@ class ControlWindow(GuiApp):
         self.gui = control_gui
         self.actioncmd: Optional[Callable[[], None]] = None
 
-        ver = constants.LLI_CURRENT_VERSION
-        text = f"Update {constants.APP_NAME}\ncurrent: v{ver}\nlatest: ..." 
-        # Spawn a thread to update the label with the current version
-        def _update_lli_version():
-            text = f"Update {constants.APP_NAME}\ncurrent: v{ver}\nlatest: v{self.conf.app_latest_version}" 
-            self.gui.update_lli_label.config(text=text)
-            self.update_latest_lli_release_button()
+        self._updates_busy = False
+        self.gui.update_lli_label.config(text="Updates: checking…")
         self.gui.update_lli_button.state(['disabled'])
-        self.start_thread(_update_lli_version)
 
         if self.conf._raw.faithlife_product:
             control_gui.update_product_labelvar.set(f"Update {self.conf._raw.faithlife_product}")
@@ -481,7 +475,6 @@ class ControlWindow(GuiApp):
                     self.update_app_button()
                 last_state = copy.copy(self.logos.logos_state)
         self.start_thread(_monitor_faithlife_product_pids)
-        self.gui.update_lli_label.config(text=text)
         self.gui.run_indexing_radio.config(
             command=self.on_action_radio_clicked
         )
@@ -513,16 +506,55 @@ class ControlWindow(GuiApp):
         self.gui.restore_button.config(command=self.run_restore)
         self.gui.update_product_button.config(command=self.update_faithlife_product)
         self.gui.update_lli_button.config(
-            command=self.update_to_latest_lli_release
+            command=self.update_all
         )
         self.gui.latest_appimage_button.config(
             command=self.start_appimage_update
         )
         self.gui.set_appimage_button.config(command=self.set_appimage)
+        self.gui.check_updates_button.config(command=self.check_updates)
 
         self._config_update_hook()
         # These can be expanded to change the UI based on config changes.
         self.config_updated_hooks += [self._config_update_hook]
+        self.start_thread(self.startup_updates)
+
+    def startup_updates(self):
+        from ou_dedetai import updates
+        updates.startup(self)
+
+    def check_updates(self):
+        def check():
+            from ou_dedetai import updates
+            self._available_updates = updates.check_updates(self, refresh=True)
+            self.root.after(0, self.update_combined_button)
+        self.start_thread(check)
+
+    def update_all(self):
+        if self._updates_busy:
+            return
+        self._updates_busy = True
+        self.gui.update_lli_button.state(['disabled'])
+        def run():
+            from ou_dedetai import updates
+            try:
+                updates.update_all(self)
+            finally:
+                self._updates_busy = False
+                self._available_updates = updates.check_updates(self)
+                self.root.after(0, self.update_combined_button)
+        self.start_thread(run)
+
+    def update_combined_button(self):
+        plan = self._available_updates
+        components = plan.components if plan else []
+        text = "Updates: " + (", ".join(components) if components else "Up to date" if plan else "Checking…")
+        if plan and plan.errors:
+            text += "\nCould not check: " + ", ".join(plan.errors)
+        self.gui.update_lli_label.config(text=text)
+        self.gui.update_lli_button.state(['!disabled' if components and not self._updates_busy else 'disabled'])
+        self.gui.set_appimage_button.state(['!disabled'])
+        gui.ToolTip(self.gui.set_appimage_button, f"Current Wine: {self.conf._raw.wine_binary or 'Not selected'}")
 
     def edit_config(self):
         control.edit_file(self.conf.config_file_path)
@@ -535,6 +567,7 @@ class ControlWindow(GuiApp):
             try:
                 self.populate_defaults()
                 installer.install(self)
+                self.check_updates()
             except UserExitedFromAsk:
                 # Ensure that the defaults are properly set back up
                 self.populate_defaults()
@@ -557,7 +590,11 @@ class ControlWindow(GuiApp):
         self.start_thread(self.logos.stop)
 
     def run_logos(self, evt=None):
-        self.start_thread(self.logos.start)
+        def run():
+            from ou_dedetai.updates import verify_installation
+            if verify_installation(self):
+                self.logos.start()
+        self.start_thread(run)
 
     def run_action_cmd(self, evt=None):
         if self.actioncmd:
@@ -645,7 +682,7 @@ class ControlWindow(GuiApp):
         self.start_thread(self.update_to_latest_appimage, evt=evt)
 
     def update_to_latest_appimage(self, evt=None):
-        utils.update_to_latest_recommended_appimage(self)
+        installer.update_to_latest_wine(self)
         self.root.event_generate(evt)
 
     def set_appimage(self, evt=None):
@@ -746,11 +783,16 @@ class ControlWindow(GuiApp):
         if not self.is_installed():
             state = "disabled"
             msg = "Please install first"
-        elif self.conf._raw.wine_binary_code not in ["Recommended", "AppImage", None]:
+        elif self.conf.wine_binary not in (
+            constants.WINE_RECOMMENDED_APPIMAGE_SIGIL,
+            constants.WINE_UNTESTED_STABLE_APPIMAGE_SIGIL,
+            constants.WINE_UNTESTED_STAGING_APPIMAGE_SIGIL,
+            constants.WINE_UNTESTED_DEVELOPMENT_APPIMAGE_SIGIL,
+        ):
             state = 'disabled'
             msg = "This button is disabled. The configured install was not created using an AppImage."
         elif self.conf._raw.wine_binary is not None:
-            status, _ = utils.compare_recommended_appimage_version(self)
+            status, _ = utils.compare_recommended_wine_version(self)
             if status == 0:
                 state = '!disabled'
             elif status == 1:
@@ -773,21 +815,7 @@ class ControlWindow(GuiApp):
     def _config_update_hook(self, evt=None):
         self.update_logging_button()
         self.update_app_button()
-        try:
-            self.update_latest_lli_release_button()
-        except Exception:
-            logging.exception("Failed to update release button")
-        try:
-            self.update_latest_appimage_button()
-        except Exception:
-            logging.exception("Failed to update appimage button")
-        try:
-            self.update_product_button()
-        except Exception:
-            logging.exception("Failed to update product button")
-        product = self.conf._raw.faithlife_product
-        if product:
-            self.gui.update_product_labelvar.set(f"Update {product}")
+        self.update_combined_button()
 
 
     def current_logging_state_value(self) -> str:

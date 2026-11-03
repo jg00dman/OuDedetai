@@ -150,8 +150,6 @@ class TestFilePicker(unittest.IsolatedAsyncioTestCase):
         app.go_to_main_menu = Mock()
         with patch.object(runtime, '_ensure_stopped'), \
                 patch.object(runtime, 'runtime_options', return_value=[]), \
-                patch.object(runtime, 'recommended_appimage', return_value=None), \
-                patch.object(runtime, 'available_appimages', return_value=[]), \
                 patch.object(runtime, 'downloads_directory', return_value=self.downloads):
             async with app.run_test(size=(80, 24)) as pilot:
                 worker = asyncio.create_task(asyncio.to_thread(runtime.select_runtime, domain))
@@ -167,7 +165,7 @@ class TestFilePicker(unittest.IsolatedAsyncioTestCase):
                         break
                 self.assertIsInstance(app.screen, FilePicker)
                 self.assertEqual(app.screen.directory, self.downloads)
-                self.assertTrue(app.screen.appimages)
+                self.assertTrue(app.screen.directories)
                 await pilot.press('escape')
                 for _ in range(40):
                     await pilot.pause()

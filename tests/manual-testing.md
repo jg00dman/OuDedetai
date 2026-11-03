@@ -75,113 +75,75 @@
 | Run [Winetricks] | `4.0.0-alpha.6` | :+1: |
 | Download/Update [Winetricks] |||
 | Enable/Disable [app logging] |||
-## Wine runtime selection
+## Runtime selection and updates (select-wine-runtime-2)
 
-Use an existing test installation with Logos and its indexer stopped. Switching
-Wine does not roll back changes a Wine build subsequently makes to the prefix.
+Use a test installation with Logos and its indexer stopped. Runtime activation
+restores links/config on failure, but cannot undo changes Wine later makes to a prefix.
 
-1. GUI: open **Wine runtime → Select…**. TUI: choose **Select Wine runtime…**.
-   CLI: run `oudedetai --select-wine`. Check that the current executable is shown.
-2. Choose an AppImage in Downloads without execute permission. Confirm that the
-   managed copy becomes executable, the original is unchanged, and launching
-   Logos uses the selected version. Restart Ou Dedetai and check the selection.
-3. Select another installed AppImage, then switch back. Check `wine --version`
-   via `oudedetai --wine --version` and launch Logos with each selection.
-4. Select system Wine, local Proton, and a custom Wine executable in turn. For
-   an uninstalled Wine build, check detection of `server/wineserver`, or select
-   its matching server explicitly when prompted. Check the selected runtime in
-   the Wine log and test launching Logos and the indexer.
-5. Leave the runtime menu with Esc and cancel a file dialog. Try an invalid AppImage or an executable
-   that fails `--version`. Confirm the prior selection remains active.
-6. Start Logos or indexing, then attempt a switch. Confirm the manager asks you
-   to stop them without changing the selection.
-7. From an AppImage installation, test **Update to Latest AppImage** when an
-   update exists. Confirm it activates and persists the downloaded runtime.
+### Selection in GUI, TUI, and CLI
 
-### Combined runtime picker
+1. Open **Set Runtime** in the existing GUI or **Set Runtime…** in the TUI.
+   Compare its standard choices with **Advanced Install**. Both must offer our
+   latest stable release as recommended and latest pre-release as testing, plus
+   the existing upstream AppImage and locally discovered Wine options.
+2. Check the recommendation against
+   https://github.com/FaithLife-Community/wine-appimages/releases.
+   Prefer a bundle asset within the selected release. If that release has only
+   an AppImage, clearly show the fallback; never silently install a different
+   release or a source-code archive. Testing must not be the default.
+3. GUI: browse with **Custom file…** or **Bundle directory…**. TUI: navigate the
+   file browser and use **Use this directory** for an extracted bundle. Browse
+   archives, AppImages, and Wine executables. Check spaces and brackets in names,
+   parent-directory navigation, cancellation, and an 80×16 terminal.
+4. Select a custom `.tar.xz`, `.tar.gz`, or `.tgz` bundle. Confirm extraction into
+   its own managed directory, including libraries. Select an already-extracted
+   bundle outside the installation and confirm that its complete layout is used.
+5. Select an AppImage without execute permission: its managed copy must become
+   executable without changing the source. Switch AppImage → bundle → AppImage;
+   confirm Wine, wineserver, and winetricks use the new runtime, without stale links.
+6. Select local Wine or Proton. If necessary, browse for its matching wineserver.
+   Restart OD and check that the same runtime and server remain selected.
+7. Try invalid archives/AppImages, missing files, failed version probes, and
+   unwritable config files. The working runtime, config, and links must survive.
+   Try switching with Logos or its indexer running: activation must be refused.
+8. Before installation, choose a runtime and confirm that no runtime is copied,
+   extracted, or downloaded until installation starts. Choosing it must not ask
+   for an installation directory. Run normal and advanced installations with it.
+9. CLI equivalents:
+   - `oudedetai --select-wine` (also `--select-runtime`)
+   - `oudedetai --set-runtime /path/to/runtime`
+   - Legacy `--set-appimage /path/to/image.AppImage` remains supported.
 
-- In the GUI, verify one resizable list contains installed AppImages, local Wine,
-  local Proton (including build names), and the current custom build. The current
-  runtime starts highlighted. The recommended AppImage has `(recommended)`;
-  `(current)` is independent and may appear on another entry. The recommendation
-  follows the installer default for this machine, including its beta-channel
-  workaround for Chromium and Snap/Flatpak browsers, and stable fallback when
-  no beta AppImage is available.
-- Check local Wine and Proton with and without installations. Missing entries
-  must say `(not found)`, appear grey, and cannot enable **Select**. Detected
-  entries gain their reported Wine version without freezing the window; a failed
-  or timed-out probe says `version unknown`.
-- Check long filenames and paths with the horizontal and vertical scrollbars,
-  resize the window, and copy the selected path from the read-only path field.
-- Use **Add new…** for an AppImage in Downloads and for a personal Wine build.
-  Choosing the candidate should validate and activate it immediately. Ask for wineserver only when it cannot be found.
-- Try a failed activation or decline a version warning: the window stays open,
-  the old runtime stays active, and another choice can be selected.
-- In TUI/CLI, verify the combined menu includes versions, current/recommended
-  labels, and **Add new…**. Missing runtimes appear as informational text rather
-  than selectable choices. Choosing a file activates it immediately.
+### Unified updates and first-run verification
 
-- Check that the instruction is bold and the window background matches the
-  themed label/frame backgrounds, including the gaps around the buttons.
-- While the newest `FaithLife-Community/wine-appimages` release is marked as a
-  pre-release, confirm both the latest stable AppImage and the pre-release are
-  listed, the pre-release labelled **(pre-release)** and the stable release
-  **(recommended)**. This holds with a Chromium, snap or Flatpak default browser
-  too: #435 only logs a warning and no longer switches the install to the
-  pre-release. After the pre-release is promoted, only the new stable release
-  should be offered.
-- With the recommended AppImage absent, confirm it still appears as
-  **(recommended) (download required)** and can be selected. Opening or cancelling
-  the picker must not download anything. **Select** should reuse the installer's
-  download/cache/verification flow, show progress, then activate the managed copy.
-  Repeat with a cached download and a failed download: failure must leave the
-  picker open and preserve the active runtime and configuration.
+1. The existing GUI **Update** button lists available OD, Runtime, and Logos
+   updates alongside it. It is disabled when nothing is available. **Check**
+   refreshes availability. The TUI has the equivalent combined menu action and
+   a disabled status entry when there are no updates. CLI: `oudedetai --update`.
+2. With all three available, update OD alone and restart into the new binary.
+   Check that the configured installation is retained and the old process does
+   not continue updating Runtime or Logos. Keep the current config path on restart.
+3. On first run with a missing/different `last_verified_od_version`, verify
+   dependencies, runtime links, required registry settings, fonts, printing,
+   and ICU files. Existing renderer, font smoothing, and font replacements must
+   be preserved. Logos must not be reinstalled by verification.
+4. Confirm both config copies record the OD version only after successful
+   verification. Reopen OD: successful verification must not repeat. Interrupt
+   or fail a required step: it must remain pending and retry on the next run;
+   Runtime and Logos updates must be paused until it succeeds.
+5. After verification, use **Update** again: Runtime completes before Logos.
+   Fail the runtime update and confirm Logos is left pending.
+6. From either stable or testing, offer a newer testing build and clearly warn
+   that it is a pre-release. Prefer a newer stable release when one is available.
+   An older stable release must not downgrade a newer testing build. Promotion
+   of the installed testing release to stable should be recognised.
+7. With a custom runtime, warn before replacing it. Decline replacement and
+   confirm a separately approved Logos update can still proceed. Accept and
+   confirm selection of the recommended release, preferring its bundle.
+8. Explicit AppImage selections follow AppImage updates. A default recommendation
+   that fell back to an AppImage must move to a bundle when the same/newer release
+   provides one. Legacy CLI update options remain available; `--update-runtime`
+   is an alias for `--update-latest-appimage`.
 
-### Runtime file browsing and cancellation
-
-- Open **Add new…** in GUI and TUI: start in `$HOME/Downloads`, or `$HOME` if
-  Downloads does not exist. Show AppImage files initially and keep directories
-  navigable. Switch to **All files** to choose a custom Wine executable.
-- In TUI, use the existing themed list and buttons: arrows to move, Enter to
-  open a directory or choose a file, `.. /` to move up, and the optional path
-  field to paste a location. Check filenames containing spaces and brackets.
-- Cancel or Esc in the file browser returns to the runtime menu without adding
-  or activating anything. In the runtime menu, the **Cancel** button or Esc leaves
-  without changing Wine; there are no extra Cancel/Exit entries in the list. Check
-  a long list in an 80×16 terminal: the Cancel button must stay visible.
-- Other TUI prompts are unchanged: they still offer **Exit** and **Return to Main
-  Menu** where they did before.
-- Select a custom Wine build without a discoverable wineserver. The TUI server
-  chooser should browse all files, starting beside that Wine executable.
-
-### Final runtime selection flow
-
-- The current runtime is always first, bold, and marked `(current)` in GUI and
-  TUI. Selecting it returns without writing configuration or changing links.
-  **Cancel**, Esc or closing the window leaves it without changes.
-- **Add new…** opens the filtered file chooser. Choosing a file validates and
-  activates it immediately, then returns to the main window/menu. There is no
-  second Select step. Cancel in the file chooser returns to the runtime list.
-- Invalid files, failed downloads/saves, or declined compatibility warnings
-  leave the runtime list open and preserve the previous selection.
-
-### Optional runtime selection before installing
-
-- With no Logos/Verbum installation, verify the normal **Install** action still
-  uses its existing default runtime with no additional runtime question.
-- Before installing, open **Wine runtime → Select…** in GUI, **Select Wine
-  runtime…** in TUI, or `oudedetai --select-wine` in CLI. The GUI advanced-install
-  dialog also has **Choose runtime…**. Choose an AppImage, local Wine, Proton, or
-  personal Wine build. Cancel/Esc leaves the normal default-install path available.
-- Choosing before installing only records the choice. Confirm nothing is
-  downloaded, copied or linked, and you are not asked for a product or install
-  directory; the installer then asks its usual questions (minus the Wine one).
-  A pre-release or stable release is downloaded by the installer, not the picker.
-- Run the installation after selecting a runtime. Check prefix initialization,
-  MSI execution, and wineserver commands all use the selection. An explicit
-  AppImage must not be replaced by the default download, and a personal build's
-  separately chosen wineserver must be retained. Restart and confirm persistence.
-- Remove a selected runtime before installing: installation should report it
-  missing rather than silently choosing a default.
-- While a runtime dialog is open, attempting to install must ask you to finish
-  the selection. During installation another GUI picker must not switch runtimes.
+Desktop execution, self-replacement/restart, dependency elevation, and real Logos
+launch/indexing should be tested on a disposable installation before release.

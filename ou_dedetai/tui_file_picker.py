@@ -25,11 +25,12 @@ class FilePicker(ModalScreen[str | None]):
     FilePicker Button { margin: 0 1; }
     """
 
-    def __init__(self, title: str, directory: Path, appimages: bool = False):
+    def __init__(self, title: str, directory: Path, appimages: bool = False, *, directories: bool = False):
         super().__init__()
         self.dialog_title = title
         self.directory = directory
         self.appimages = appimages
+        self.directories = directories
         self.paths: list[Path] = []
 
     def compose(self) -> ComposeResult:
@@ -42,6 +43,8 @@ class FilePicker(ModalScreen[str | None]):
             with Horizontal(id='dialog-buttons'):
                 yield Button(self.filter_label, id='file-filter')
                 yield Button('Select', variant='primary', id='file-select')
+                if self.directories:
+                    yield Button('Use this directory', id='directory-select')
                 yield Button('Cancel', id='file-cancel')
 
     @property
@@ -100,6 +103,10 @@ class FilePicker(ModalScreen[str | None]):
             self.open_path(Path(value))
         elif index is not None:
             self.open_path(self.paths[index])
+
+    @on(Button.Pressed, '#directory-select')
+    def select_directory(self):
+        self.dismiss(str(self.directory.absolute()))
 
     @on(Input.Submitted, '#file-path')
     def submitted(self):

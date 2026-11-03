@@ -46,7 +46,8 @@ class TestRuntimeMenu(unittest.TestCase):
     def test_optional_runtime_menu_is_available_before_install(self):
         app = Mock()
         app.is_installed.return_value = False
+        app._available_updates = None
         with patch('ou_dedetai.tui_app.constants.RUNMODE', 'source'):
             options = TUI.set_tui_menu_options(app)
         self.assertIn('Install', options)
-        self.assertIn('Select Wine runtime…', options)
+        self.assertIn('Set Runtime…', options)

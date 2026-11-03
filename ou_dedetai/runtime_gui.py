@@ -29,7 +29,6 @@ class RuntimePicker:
         self.options = []
         self.recommended = None
         self.recommendation = None
-        self.releases: list[runtime.AppImageRelease] = []
         self.busy = True
         self.closed = False
         self.status = StringVar(value='Finding installed runtimes…')
@@ -59,15 +58,15 @@ class RuntimePicker:
         buttons.grid(row=3, column=0, sticky='e', padx=10, pady=10)
         self.select_button = ttk.Button(buttons, text='Select', command=self.select, state='disabled')
         self.select_button.pack(side='left', padx=5)
-        self.add_button = ttk.Button(buttons, text='Add new…', command=self.add, state='disabled')
+        self.add_button = ttk.Button(buttons, text='Custom file…', command=self.add, state='disabled')
         self.add_button.pack(side='left', padx=5)
+        self.directory_button = ttk.Button(buttons, text='Bundle directory…', command=self.add_directory)
+        self.directory_button.pack(side='left', padx=5)
         self.window.protocol('WM_DELETE_WINDOW', self.close)
         self.window.bind('<Escape>', lambda event: self.close())
         self.window.bind('<Return>', lambda event: self.select())
         self.window.after(50, self.poll)
         self.work(lambda: runtime.runtime_options(app), self.loaded)
-        self.work(lambda: runtime.recommended_appimage(app), self.set_recommended)
-        self.work(lambda: runtime.available_appimages(app), self.set_releases)
 
     def work(self, operation, complete):
         def run():
@@ -92,31 +91,19 @@ class RuntimePicker:
 
     def loaded(self, options):
         self.options = options
-        runtime.include_releases(self.app, self.options, self.releases)
-        runtime.include_recommended(self.app, self.options, self.recommendation)
         self.set_busy(False)
         self.redraw(next((i for i, item in enumerate(options) if item.current), None))
         for option in options:
             self.probe(option)
 
     def probe(self, option):
-        if option.path and option.path.suffix.lower() != '.appimage':
+        if (option.path and option.path.is_file() and not option.choice
+                and not runtime.is_archive(option.path) and option.path.suffix.lower() != '.appimage'):
             self.work(lambda: runtime.runtime_version(option.path),
                       lambda version: self.version_ready(option, version))
 
     def version_ready(self, option, version):
         option.version = version
-        self.redraw()
-
-    def set_recommended(self, release):
-        self.recommendation = release
-        self.recommended = release[0] if release else None
-        runtime.include_recommended(self.app, self.options, release)
-        self.redraw()
-
-    def set_releases(self, releases):
-        self.releases = releases
-        runtime.include_releases(self.app, self.options, releases)
         self.redraw()
 
     def redraw(self, index=None):
@@ -128,8 +115,8 @@ class RuntimePicker:
         self.list.delete(*self.list.get_children())
         width = 0
         for row, option in enumerate(self.options):
-            option.recommended = option.path is not None and option.path.name == self.recommended
-            tags = ('current',) if option.current else (('missing',) if option.path is None else ())
+            missing = option.path is None and option.choice is None
+            tags = ('current',) if option.current else (('missing',) if missing else ())
             self.list.insert('', 'end', iid=str(row), text=option.label, tags=tags)
             width = max(width, self.instruction_font.measure(option.label) + 24)
         self.list.column('#0', width=width)
@@ -142,15 +129,16 @@ class RuntimePicker:
     def highlight(self, event=None):
         selected = self.list.selection()
         option = self.options[int(selected[0])] if selected else None
-        if option is not None and option.path is None:
+        if option is not None and option.path is None and option.choice is None:
             self.list.selection_remove(*selected)
             option = None
-        self.path.set(str(option.path) if option else '')
+        self.path.set(str(option.path) if option and option.path else '')
         self.select_button.configure(state='normal' if option and not self.busy else 'disabled')
 
     def set_busy(self, busy):
         self.busy = busy
         self.add_button.configure(state='disabled' if busy else 'normal')
+        self.directory_button.configure(state='disabled' if busy else 'normal')
         self.status.set('Downloading or validating runtime…' if busy else 'Choose a runtime, then press Select.')
         self.highlight()
 
@@ -158,17 +146,27 @@ class RuntimePicker:
         if self.busy:
             return
         path = filedialog.askopenfilename(
-            parent=self.window, title='Choose an AppImage or Wine executable',
+            parent=self.window, title='Choose an AppImage, bundle archive, or Wine executable',
             initialdir=runtime.downloads_directory(),
-            filetypes=[('AppImages', ('*.AppImage', '*.appimage')), ('All files', '*')])
+            filetypes=[('Wine runtimes', ('*.AppImage', '*.appimage', '*.tar.xz', '*.tar.gz', '*.tgz')),
+                       ('All files', '*')])
         if not path:
             return
         self.set_busy(True)
         self.work(lambda: runtime.added_runtime(Path(path)), self.added)
 
+    def add_directory(self):
+        if self.busy:
+            return
+        path = filedialog.askdirectory(parent=self.window, title='Choose an extracted Wine bundle',
+                                       initialdir=runtime.downloads_directory())
+        if path:
+            self.set_busy(True)
+            self.work(lambda: runtime.added_runtime(Path(path)), self.added)
+
     def added(self, option):
         self.set_busy(False)
-        if option.path.suffix.lower() != '.appimage' and option.server is None:
+        if runtime.needs_server(option):
             server = self.choose_server()
             if server is None:
                 return
@@ -187,7 +185,7 @@ class RuntimePicker:
         if self.busy or not selected:
             return
         option = self.options[int(selected[0])]
-        if option.path is None:
+        if option.path is None and option.choice is None:
             return
         if option.current:
             self.close()
@@ -195,7 +193,7 @@ class RuntimePicker:
         self.activate(option)
 
     def activate(self, option):
-        if option.path.suffix.lower() != '.appimage' and option.server is None:
+        if runtime.needs_server(option):
             option.server = runtime._server_for(option.path) or self.choose_server()
             if option.server is None:
                 return
@@ -207,6 +205,7 @@ class RuntimePicker:
     def activated(self, result):
         self.busy = False
         self.close()
+        self.app.check_updates()
 
     def failed(self, error):
         self.set_busy(False)

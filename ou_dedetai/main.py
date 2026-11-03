@@ -157,10 +157,13 @@ def get_parser():
         help=f'Update {constants.APP_NAME} to the latest release.',
     )
     cmd.add_argument(
-        '--update-latest-appimage', '-U', action='store_true',
-        help='Update the to the latest AppImage.',
+        '--update-runtime', '--update-latest-appimage', '-U', dest='update_latest_appimage', action='store_true',
+        help='Update the selected runtime (the old AppImage option remains an alias).',
     )
-    cmd.add_argument('--select-wine', action='store_true',
+    cmd.add_argument('--update', action='store_true', help='Update OD, Runtime, and Logos in order.')
+    cmd.add_argument('--set-runtime', nargs=1, metavar='RUNTIME_PATH',
+                     help='Select an AppImage, bundle archive/directory, or Wine executable.')
+    cmd.add_argument('--select-wine', '--select-runtime', dest='select_wine', action='store_true',
                      help='Optionally select Wine before installing, or change an existing installation.')
     cmd.add_argument(
         '--set-appimage', nargs=1, metavar=('APPIMAGE_FILE_PATH'),
@@ -272,7 +275,13 @@ def parse_args(args, parser) -> Tuple[EphemeralConfiguration, Callable[[Ephemera
         
         Lazily instantiates CLI at call-time"""
         def _run(config: EphemeralConfiguration):
-            getattr(cli.CLI(config), action)()
+            app = cli.CLI(config)
+            from ou_dedetai.updates import verify_installation
+            exempt = {'update', 'update_self', 'stop_installed_app', 'uninstall', 'edit_config',
+                      'get_support', 'select_wine', 'set_runtime', 'set_appimage'}
+            if action not in exempt and not verify_installation(app):
+                return
+            getattr(app, action)()
         output = _run
         output.__name__ = action
         return output
@@ -294,6 +303,8 @@ def parse_args(args, parser) -> Tuple[EphemeralConfiguration, Callable[[Ephemera
         'stop_installed_app',
         'set_appimage',
         'select_wine',
+        'set_runtime',
+        'update',
         'toggle_app_logging',
         'update_self',
         'update_latest_appimage',
@@ -305,6 +316,8 @@ def parse_args(args, parser) -> Tuple[EphemeralConfiguration, Callable[[Ephemera
     run_action = None
     for arg in actions:
         if getattr(args, arg) or getattr(args, arg) == []:
+            if arg == 'set_runtime':
+                ephemeral_config.custom_binary_path = args.set_runtime[0]
             if arg == "set_appimage":
                 ephemeral_config.wine_appimage_path = getattr(args, arg)[0]
                 if not utils.file_exists(ephemeral_config.wine_appimage_path):
@@ -391,9 +404,6 @@ def run(ephemeral_config: EphemeralConfiguration, action: Callable[[EphemeralCon
     # installed when it's broken
     detect_and_recover(ephemeral_config)
     # Run desired action (requested function, defaults to control_panel)
-    if action == "disabled":
-        print("That option is disabled.", file=sys.stderr)
-        sys.exit(1)
     if action.__name__ == 'run_control_panel':
         # if utils.app_is_installed():
         #     wine.set_logos_paths()

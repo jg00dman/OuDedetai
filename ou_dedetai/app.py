@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import sys
 import threading
-from typing import Callable, NoReturn, Optional
+from typing import TYPE_CHECKING, Callable, NoReturn, Optional
 
 from ou_dedetai import constants
 from ou_dedetai.constants import (
@@ -13,6 +13,10 @@ from ou_dedetai.constants import (
     PROMPT_OPTION_FILE,
     PROMPT_OPTION_NEW_FILE
 )
+
+
+if TYPE_CHECKING:
+    from ou_dedetai.updates import UpdatePlan
 
 
 class UserExitedFromAsk(Exception):
@@ -37,6 +41,7 @@ class App(abc.ABC):
     Set when exit() is called off the main thread; read by the CLI/TUI polling
     loops so they can re-invoke exit() on the main thread.
     """
+    _available_updates: "UpdatePlan | None" = None
     _last_status: Optional[str] = None
     """The last status we had"""
     config_updated_hooks: list[Callable[[], None]] = []
@@ -48,6 +53,7 @@ class App(abc.ABC):
         from ou_dedetai.logos import LogosManager
         from ou_dedetai.system import check_incompatibilities
 
+        self._wine_selection_lock = threading.Lock()
         self.conf = Config(config, self)
         self.logos = LogosManager(app=self)
         self._threads = []
@@ -140,9 +146,12 @@ class App(abc.ABC):
     def choose_runtime(self, question: str, options: list[str], current: str | None) -> str:
         return self.ask(question, options)
 
-    def choose_file(self, question: str, *, initial_dir: Path, appimages: bool = False) -> str:
+    def choose_file(
+        self, question: str, *, initial_dir: Path, appimages: bool = False, directories: bool = False
+    ) -> str:
         """Choose an existing file; text-only frontends can still accept a path."""
-        return self.ask(question, [PROMPT_OPTION_FILE])
+        options = [PROMPT_OPTION_FILE, PROMPT_OPTION_DIRECTORY] if directories else [PROMPT_OPTION_FILE]
+        return self.ask(question, options)
 
     def approve_or_exit(self, question: str, context: Optional[str] = None) -> bool:
         """Asks the user a question, if they refuse, shutdown"""

@@ -5,13 +5,14 @@ from ou_dedetai.gui_app import ControlWindow, GuiApp
 
 
 class TestRuntimeMenu(unittest.TestCase):
-    def test_selection_is_available_for_system_wine(self):
+    def test_combined_update_is_disabled_without_updates(self):
+        from ou_dedetai.updates import UpdatePlan
         window = Mock()
-        window.is_installed.return_value = True
-        window.conf._raw.wine_binary_code = 'System'
-        window.conf._raw.wine_binary = '/usr/bin/wine'
+        window._available_updates = UpdatePlan()
+        window._updates_busy = False
         with patch('ou_dedetai.gui_app.gui.ToolTip'):
-            ControlWindow.update_latest_appimage_button(window)
+            ControlWindow.update_combined_button(window)
+        window.gui.update_lli_button.state.assert_called_once_with(['disabled'])
         window.gui.set_appimage_button.state.assert_called_once_with(['!disabled'])
 
     def test_picker_opens_on_tk_thread(self):
@@ -25,10 +26,13 @@ class TestRuntimeMenu(unittest.TestCase):
         with patch('ou_dedetai.gui_app.fd.askopenfilename', return_value=''):
             self.assertIsNone(GuiApp._ask(Mock(), 'Choose runtime', constants.PROMPT_OPTION_FILE))
 
-    def test_selection_is_available_before_install(self):
+    def test_combined_update_lists_all_components(self):
+        from ou_dedetai.updates import UpdatePlan
+        from ou_dedetai.runtime import RuntimeOption
         window = Mock()
-        window.is_installed.return_value = False
+        window._available_updates = UpdatePlan(od=True, runtime=RuntimeOption('Bundle', None), logos='50')
+        window._updates_busy = False
         with patch('ou_dedetai.gui_app.gui.ToolTip'):
-            ControlWindow.update_latest_appimage_button(window)
-        window.gui.set_appimage_button.state.assert_called_once_with(['!disabled'])
-        window.gui.latest_appimage_button.state.assert_called_once_with(['disabled'])
+            ControlWindow.update_combined_button(window)
+        window.gui.update_lli_label.config.assert_called_once_with(text='Updates: OD, Runtime, Logos')
+        window.gui.update_lli_button.state.assert_called_once_with(['!disabled'])

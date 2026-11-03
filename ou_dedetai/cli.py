@@ -44,6 +44,9 @@ class CLI(App):
         self.exit("Install has finished", intended=True)
 
     def update_installed_app(self):
+        from ou_dedetai.updates import verify_installation
+        if not verify_installation(self):
+            return
         utils.update_faithlife_product(self)
         self.exit("Update has finished", intended=True)
 
@@ -69,6 +72,9 @@ class CLI(App):
         self.logos.index()
 
     def run_installed_app(self):
+        from ou_dedetai.updates import verify_installation
+        if not verify_installation(self):
+            return
         self.logos.start()
         # Keep the process running so that our background threads can keep running
         while self.logos.logos_state != LogosRunningState.STOPPED:
@@ -112,6 +118,19 @@ class CLI(App):
         from ou_dedetai.runtime import select_runtime
         select_runtime(self)
 
+    def set_runtime(self):
+        from ou_dedetai import runtime
+        from pathlib import Path
+        path = self.conf._overrides.custom_binary_path
+        if path is None:
+            raise ValueError('A runtime path is required')
+        with runtime.selection_lock(self):
+            runtime.activate_option(self, runtime.added_runtime(Path(path)))
+
+    def update(self):
+        from ou_dedetai.updates import update_all
+        update_all(self)
+
     def set_appimage(self):
         utils.set_appimage_symlink(app=self)
 
@@ -119,7 +138,7 @@ class CLI(App):
         self.logos.switch_logging()
 
     def update_latest_appimage(self):
-        utils.update_to_latest_recommended_appimage(self)
+        installer.update_to_latest_wine(self)
 
     def update_self(self):
         utils.update_to_latest_lli_release(self)
