@@ -1,35 +1,31 @@
 import hashlib
-import json
 from pathlib import Path
-import subprocess
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from ou_dedetai.config import Config, LegacyConfiguration, PersistentConfiguration
-from ou_dedetai.logos import LogosManager, State
 from ou_dedetai.opensapi import ASSET, Speech
+from ou_dedetai.logos import State, LogosManager
+import subprocess
 
 
 class SpeechTests(unittest.TestCase):
     def setUp(self):
-        directory = tempfile.TemporaryDirectory()
-        self.addCleanup(directory.cleanup)
-        self.root = Path(directory.name)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        environment = patch.dict('os.environ', {'XDG_DATA_HOME': str(self.root / 'share')})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.app = Mock()
-        self.app.conf.install_dir = str(self.root)
-        self.app.conf.installer_binary_dir = str(self.root / 'bin')
-        self.app.conf.wine_prefix = str(self.root / 'prefix')
+        self.app.conf.wine_prefix = '/logos/prefix'
         self.app.conf.wine_binary = '/wine/AppImage'
         self.app.logos.logos_state = State.STOPPED
         self.speech = Speech(self.app)
-        self.speech.settings.parent.mkdir(parents=True)
-        self.speech.settings.write_text(json.dumps({'port': 5000, 'voices': {}}))
-        self.app.logos.speech = self.speech
 
-    def test_uses_wine_binary_directory_and_separate_installation_profile(self):
-        self.assertEqual(self.speech.binary, self.root / 'bin' / ASSET)
-        self.assertEqual(self.speech.settings, self.root / 'data/opensapi/settings.json')
+    def test_only_shared_binary_path_is_derived(self):
+        self.assertEqual(self.speech.binary, self.root / 'share/OpenSAPI' / ASSET)
+        self.assertEqual(self.speech.command('--configure'), [str(self.speech.binary), '--configure'])
 
     def test_latest_standalone_download_and_checksum(self):
         data = b'AppImage'
@@ -51,7 +47,7 @@ class SpeechTests(unittest.TestCase):
         self.assertTrue(self.speech.binary.stat().st_mode & 0o111)
 
     def test_checksum_failure_preserves_existing_binary(self):
-        self.speech.binary.parent.mkdir()
+        self.speech.binary.parent.mkdir(parents=True)
         self.speech.binary.write_bytes(b'original')
         listing = Mock()
         listing.json.return_value = [{'published_at': '', 'draft': False, 'assets': [
@@ -66,58 +62,33 @@ class SpeechTests(unittest.TestCase):
                 self.speech.download()
         self.assertEqual(self.speech.binary.read_bytes(), b'original')
 
-    def test_reused_server_is_never_stopped(self):
-        self.speech.health = Mock(return_value={'settings': str(self.speech.settings.resolve()), 'ready': True})
-        with patch('ou_dedetai.opensapi.subprocess.Popen') as spawn, patch('os.killpg') as kill:
-            self.speech.start()
-            self.speech.stop()
-        spawn.assert_not_called()
-        kill.assert_not_called()
-
-    def test_foreign_server_is_not_reused_or_stopped(self):
-        self.speech.health = Mock(return_value={'settings': '/another/profile', 'ready': True})
-        with self.assertRaisesRegex(RuntimeError, 'Another speech service'):
-            self.speech.start()
-        self.assertIsNone(self.speech.process)
-
-    def test_start_and_stop_owned_instance_uses_private_control_protocol(self):
-        self.speech.binary.parent.mkdir()
+    def test_start_stop_use_public_session_commands_only(self):
+        self.speech.binary.parent.mkdir(parents=True)
         self.speech.binary.touch()
-        process = Mock(pid=999999)
-        process.poll.side_effect = [None, 0]
-        self.speech.health = Mock(side_effect=lambda: None if self.speech.instance is None else {
-            'ready': True, 'instance': self.speech.instance})
-        with patch('ou_dedetai.opensapi.subprocess.Popen', return_value=process) as spawn, \
-                patch('ou_dedetai.opensapi.subprocess.run') as run:
+        with patch('ou_dedetai.opensapi.subprocess.run') as run:
             self.speech.start()
-            self.assertIn('--serve', spawn.call_args.args[0])
-            self.assertEqual(self.speech.settings.with_suffix('.control').stat().st_mode & 0o777, 0o600)
+            session = self.speech.session
             self.speech.stop()
-            self.assertIn('--stop-server', run.call_args.args[0])
-        self.assertIsNone(self.speech.process)
+        self.assertIn('--acquire-session', run.call_args_list[0].args[0])
+        self.assertIn('--owner-pid', run.call_args_list[0].args[0])
+        self.assertEqual(run.call_args_list[1].args[0][-2:], ['--release-session', session])
+        self.assertIsNone(self.speech.session)
 
-    def test_install_passes_selected_prefix_and_wine_without_shell(self):
-        self.speech.binary.parent.mkdir()
+    def test_no_session_means_no_stop_request(self):
+        with patch('ou_dedetai.opensapi.subprocess.run') as run:
+            self.speech.stop()
+        run.assert_not_called()
+
+    def test_install_passes_prefix_and_wine_but_no_private_settings(self):
+        self.speech.binary.parent.mkdir(parents=True)
         self.speech.binary.touch()
-        with patch('ou_dedetai.opensapi.subprocess.run') as run, patch('ou_dedetai.opensapi.subprocess.Popen'):
+        with patch('ou_dedetai.opensapi.subprocess.run', return_value=subprocess.CompletedProcess([], 0, '2')) as run, \
+                patch('ou_dedetai.opensapi.subprocess.Popen') as panel:
             self.speech.configure()
         args = run.call_args.args[0]
         self.assertEqual(args[args.index('--wine-prefix') + 1], self.app.conf.wine_prefix)
-        self.assertEqual(args[args.index('--wine') + 1], self.app.conf.wine_binary)
-        self.assertNotIn('shell', run.call_args.kwargs)
-
-    def test_config_preference_survives_legacy_environment_defaults(self):
-        path = self.root / 'config.json'
-        path.write_text(json.dumps({'speech_enabled': True}))
-        with patch.object(LegacyConfiguration, 'load_from_env', return_value=LegacyConfiguration()):
-            config = PersistentConfiguration.load_from_path(str(path))
-        self.assertTrue(config.speech_enabled)
-        conf = object.__new__(Config)
-        conf._raw = config
-        conf._write = Mock()
-        conf.speech_enabled = False
-        self.assertFalse(conf.speech_enabled)
-        conf._write.assert_called_once()
+        self.assertNotIn('--settings', args)
+        self.assertEqual(panel.call_args.args[0][-1], '--configure')
 
 
 class SpeechLifecycleTests(unittest.TestCase):

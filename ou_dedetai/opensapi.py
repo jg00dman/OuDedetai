@@ -1,16 +1,11 @@
 """Optional standalone OpenSAPI installation and Logos-session ownership."""
 import hashlib
-import json
 import logging
 import os
 from pathlib import Path
-import secrets
-import signal
 import subprocess
 import tempfile
-import threading
 import time
-import urllib.request
 import uuid
 
 import requests
@@ -22,29 +17,14 @@ REPOSITORY = 'https://api.github.com/repos/jg00dman/opensapi'
 class Speech:
     def __init__(self, app):
         self.app = app
-        self.instance = None
-        self.process = None
-        self.lock = threading.RLock()
+        self.session = None
 
     @property
     def binary(self):
-        return Path(self.app.conf.installer_binary_dir) / ASSET
-
-    @property
-    def settings(self):
-        return Path(self.app.conf.install_dir) / 'data/opensapi/settings.json'
-
-    def health(self):
-        try:
-            config = json.loads(self.settings.read_text())
-            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-            with opener.open(f'http://127.0.0.1:{config.get("port", 5000)}/health', timeout=1) as response:
-                return json.load(response)
-        except (OSError, ValueError):
-            return None
+        return Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'OpenSAPI' / ASSET
 
     def command(self, *args):
-        return [str(self.binary), '--settings', str(self.settings), *args]
+        return [str(self.binary), *args]
 
     def environment(self):
         # PyInstaller's library path must not leak into the separate AppImage/Wine.
@@ -59,21 +39,21 @@ class Speech:
     def configure(self):
         from .logos import State
         manifest = Path(self.app.conf.wine_prefix) / 'drive_c/Program Files/OpenSAPI/install-state.json'
-        if not self.binary.exists() or not manifest.exists() or not self.settings.exists():
+        current = False
+        if self.binary.exists():
+            probe = subprocess.run(self.command('--protocol-version'), env=self.environment(),
+                                   capture_output=True, text=True, timeout=15)
+            current = probe.returncode == 0 and probe.stdout.strip() == '2'
+        if not current or not manifest.exists():
             if self.app.logos.logos_state != State.STOPPED:
                 raise RuntimeError('Close Logos before installing speech support')
-            if not self.binary.exists():
+            if not current:
                 self.download()
-            self.settings.parent.mkdir(parents=True, exist_ok=True)
-            # Preserve the user's existing OpenSAPI voice selection on first use.
-            previous = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'OpenSAPI/settings.json'
-            if not self.settings.exists() and previous.exists():
-                self.settings.write_bytes(previous.read_bytes())
             with tempfile.TemporaryFile() as output:
                 subprocess.run(self.command('--wine-prefix', self.app.conf.wine_prefix,
                     '--wine', self.app.conf.wine_binary, '--install-only'), env=self.environment(),
                     stdout=output, stderr=output, check=True, timeout=240)
-        subprocess.Popen(self.command(), env=self.environment(), start_new_session=True)
+        subprocess.Popen(self.command('--configure'), env=self.environment(), start_new_session=True)
 
     def download(self):
         import platform
@@ -113,57 +93,28 @@ class Speech:
             target.replace(self.binary)
 
     def start(self):
-        with self.lock:
-            current = self.health()
-            if current:
-                if current.get('settings') != str(self.settings.resolve()) or not current.get('ready'):
-                    raise RuntimeError('Another speech service is using this port; configure speech first')
-                return  # Reused services are never claimed or stopped by this session.
-            if not self.binary.exists() or not self.settings.exists():
-                raise RuntimeError('Use Configure speech first')
-            self.instance = uuid.uuid4().hex
-            control = self.settings.with_suffix('.control')
-            descriptor = os.open(control, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            os.chmod(control, 0o600)
-            with os.fdopen(descriptor, 'w') as output:
-                output.write(secrets.token_hex(32))
-            self.settings.with_suffix('.server.json').write_text(json.dumps({
-                'instance': self.instance, 'settings': str(self.settings.resolve()),
-                'port': json.loads(self.settings.read_text()).get('port', 5000)}))
-            with self.settings.with_suffix('.server.log').open('ab') as output:
-                self.process = subprocess.Popen(self.command('--serve', '--instance', self.instance,
-                    '--control-file', str(control)), env=self.environment(), stdin=subprocess.DEVNULL,
-                    stdout=output, stderr=output, start_new_session=True)
-            deadline = time.monotonic() + 65
-            while self.process.poll() is None and time.monotonic() < deadline:
-                current = self.health()
-                if current and current.get('instance') == self.instance and current.get('ready'):
-                    return
-                time.sleep(.2)
+        if not self.binary.exists():
+            raise RuntimeError('Use Configure speech first')
+        session = self.session or uuid.uuid4().hex
+        try:
+            subprocess.run(self.command('--acquire-session', session, '--owner-pid', str(os.getpid())),
+                           env=self.environment(), check=True, timeout=100,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except BaseException:
+            # A controller may finish acquiring after the launcher timed out.
+            self.session = session
             self.stop()
-            raise RuntimeError(f'Piper could not start; see {self.settings.with_suffix(".server.log")}')
+            raise
+        self.session = session
 
     def stop(self):
-        with self.lock:
-            if self.process is None:
-                return
-            current = self.health()
-            if current and current.get('instance') == self.instance:
-                try:
-                    subprocess.run(self.command('--stop-server'), env=self.environment(), check=True,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
-                except (OSError, subprocess.SubprocessError):
-                    logging.exception('Could not stop speech gracefully')
-            if self.process.poll() is None:
-                try:
-                    os.killpg(self.process.pid, signal.SIGTERM)
-                    self.process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(self.process.pid, signal.SIGKILL)
-                    self.process.wait(timeout=5)
-                except ProcessLookupError:
-                    pass
-            self.instance = self.process = None
+        if self.session is not None:
+            try:
+                subprocess.run(self.command('--release-session', self.session), env=self.environment(),
+                               check=True, timeout=100, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except (OSError, subprocess.SubprocessError):
+                logging.exception('Could not release speech session; OpenSAPI also checks owner lifetime')
+            self.session = None
 
 
 def configure(app):

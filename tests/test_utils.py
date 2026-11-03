@@ -1,4 +1,5 @@
 import queue
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import Mock
@@ -224,14 +225,11 @@ class TestGeneralUtils(unittest.TestCase):
         pass
 
     def test_get_path_size_exists(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            child = root / 'nested'
-            child.mkdir()
-            (root / 'first').write_bytes(b'12345')
-            (child / 'second').write_bytes(b'1234567')
-            expected = 12 + root.stat().st_size + child.stat().st_size
-            self.assertEqual(expected, utils.get_path_size(root))
+        cmd = ['du', '-sb', TESTDATADIR]
+        size_du = int(subprocess.check_output(cmd).decode().split()[0])
+        size_dir = 4096
+        size = size_du + size_dir
+        self.assertEqual(size, utils.get_path_size(TESTDATADIR))
 
     def test_get_path_size_notexists(self):
         self.assertEqual(0, utils.get_path_size('./no_dir'))

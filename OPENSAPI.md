@@ -1,31 +1,35 @@
-# OpenSAPI working-branch test
+# OpenSAPI shared speech working-branch test
 
-This is an x86-64 Linux build of `codex/opensapi`, based on jg00dman/OuDedetai main.
-It adds only the optional speech integration; no PR or release is created.
+Extract the artifact, run `sha256sum --check SHA256SUMS`, then:
 
-1. Extract the build artifact, run `sha256sum --check SHA256SUMS`, then
-   `chmod +x oudedetai-x86_64` and `DIALOG=tk ./oudedetai-x86_64`.
-2. Stop any old Piper server. In the existing Logos installation, select
-   **Enable speech**. This offers configuration and, on first use, downloads the
-   newest standalone OpenSAPI release with its checksum. Its AppImage goes in
-   OuDedetai's binary directory alongside Wine AppImages.
-3. In the OpenSAPI panel, import an existing ONNX voice (matching JSON alongside),
-   choose **Make default**, and use **Settings → Install / apply voice registration**.
-   You can also review/download a voice through that panel. Models are separate
-   from the current OpenSAPI beta. Existing OpenSAPI settings are copied on first
-   use when available, preserving voice choices; subsequent settings are specific
-   to this OuDedetai installation.
-4. Close the panel without manually starting Piper. Click **Run Logos** in
-   OuDedetai; it starts speech and waits for readiness before launching Logos.
-   Test Read Aloud, then close Logos. The backend started by OuDedetai should stop.
-5. **Configure speech…** reopens the panel. Preferences and Enable speech persist.
-   Unticking Enable speech stops a backend owned by this OuDedetai session.
+```
+chmod +x oudedetai-x86_64
+DIALOG=tk ./oudedetai-x86_64
+```
 
-A compatible backend already running for this profile is reused and left running.
-A different profile's backend is left alone; speech startup reports the conflict
-and Logos still launches without speech. The same applies to missing voices or
-backend errors. Closing the configuration panel alone does not stop speech.
+Stop the older Piper service before testing. Select **Enable speech** to install
+and configure the latest compatible OpenSAPI beta. OuDedetai verifies the release
+checksum and installs `~/.local/share/OpenSAPI/OpenSAPI-x86_64.AppImage`. It invokes
+OpenSAPI to register speech in the configured Logos prefix. The bundled LJSpeech
+starter voice is available immediately on a fresh setup. Other voices and
+preferences are managed through **Configure speech…**, including model import and
+licence-reviewed downloads.
 
-The current beta is 64-bit only. Keep using the existing Wine package and prefix;
-this integration neither builds nor replaces Wine. Use a backup of the prefix for
-beta testing. The OpenSAPI panel provides Uninstall & restore for speech changes.
+Click **Run Logos**, test Read Aloud, then close Logos. OpenSAPI owns session
+tracking: it stops/exits when its last automatic session ends, but preserves an
+independent/manual instance or another application's session. Closing the control
+panel leaves speech running. Tray Quit explicitly stops Piper and exits OpenSAPI.
+
+OuDedetai stores only `speech_enabled` in its existing configuration. Everything
+else belongs to OpenSAPI: config in `~/.config/OpenSAPI`, voices/AppImage in
+`~/.local/share/OpenSAPI`, logs in `~/.local/state/OpenSAPI`, temporary service data
+in the private user runtime directory. XDG overrides are respected. Previous
+installation-specific `data/opensapi` settings are not copied or deleted.
+
+Speech errors do not prevent Logos from starting. This is an x86-64 Linux test
+build; Wine is not replaced. Keep a backup of the prefix for beta testing.
+
+The existing directory-size tests have portable-fixture corrections maintained
+separately on `codex/opensapi-test-fixtures`. Branch CI overlays those two test
+fixtures to run the full suite; they are not part of the speech integration diff.
+No PR or OuDedetai release has been created.
