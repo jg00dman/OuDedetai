@@ -245,6 +245,9 @@ class ControlGui(StatusGui):
         self.actions_button.state(['disabled'])
         s2 = Separator(self, orient='horizontal')
 
+        self.speech_enabled = BooleanVar(value=False)
+        self.speech_checkbox = Checkbutton(self, text="Enable speech", variable=self.speech_enabled)
+        self.speech_configure = Button(self, text="Configure speech…")
         # Edit config button
         self.config_label = Label(self, text="Edit config file")
         self.config_button = Button(self, text="Edit …")
@@ -303,6 +306,9 @@ class ControlGui(StatusGui):
         self.install_icu_radio.grid(column=1, row=row, sticky='w', pady=2, columnspan=2)
         row += 1
         s2.grid(column=0, row=row, columnspan=3, sticky='we', pady=2)
+        row += 1
+        self.speech_checkbox.grid(column=0, row=row, sticky='w', pady=2)
+        self.speech_configure.grid(column=1, row=row, sticky='w', pady=2)
         row += 1
         self.config_label.grid(column=0, row=row, sticky='w', pady=2)
         self.config_button.grid(column=1, row=row, sticky='w', pady=2)

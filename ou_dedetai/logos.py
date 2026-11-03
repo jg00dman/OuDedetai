@@ -12,6 +12,7 @@ from ou_dedetai import constants, database
 from ou_dedetai.app import App
 from ou_dedetai.config import get_logos_user_id
 
+from . import opensapi
 from . import system
 from . import utils
 from . import wine
@@ -29,6 +30,7 @@ class LogosManager:
         self.logos_state = State.STOPPED
         self.indexing_state = State.STOPPED
         self.app = app
+        self.speech = opensapi.Speech(app)
         self.processes: dict[str, subprocess.Popen] = {}
         """These are sub-processes we started"""
         self.existing_processes: dict[str, list[psutil.Process]] = {}
@@ -161,13 +163,24 @@ class LogosManager:
             self.set_auto_updates(False)
             if not self.app.conf.logos_exe:
                 raise ValueError("Could not find installed Logos EXE to run")
-            process = wine.run_wine_application(
-                self.app,
-                self.app.conf.wine_binary,
-                exe=self.app.conf.logos_exe
-            )
-            if process is not None:
-                self.processes[self.app.conf.logos_exe] = process
+            if self.app.conf.speech_enabled:
+                try:
+                    self.speech.start()
+                except Exception as error:
+                    logging.exception('Speech unavailable; continuing without speech')
+                    self.app.status(f'Speech unavailable; starting Logos without speech: {error}')
+            try:
+                process = wine.run_wine_application(
+                    self.app, self.app.conf.wine_binary, exe=self.app.conf.logos_exe)
+            except BaseException:
+                self.speech.stop()
+                self.logos_state = State.STOPPED
+                raise
+            if process is None:
+                self.speech.stop()
+                self.logos_state = State.STOPPED
+                return
+            self.processes[self.app.conf.logos_exe] = process
             self.logos_state = State.RUNNING
 
         # Ensure wine version is compatible with Logos release version.
@@ -285,11 +298,13 @@ class LogosManager:
                 logging.debug(f"Error while stopping Logos processes: {e}.")
         else:
             logging.debug("No Logos processes to stop.")
+        self.speech.stop()
         self.logos_state = State.STOPPED
         # The Logos process has exited, if we wait here it hangs
         # wine.wineserver_wait(self.app)
 
     def end_processes(self):
+        self.speech.stop()
         for process_name, process in self.processes.items():
             if isinstance(process, subprocess.Popen):
                 logging.debug(f"Found {process_name} in Processes. Attempting to close {process}.")

@@ -327,6 +327,7 @@ class PersistentConfiguration:
     faithlife_product_logging: Optional[bool] = None
     install_dir: Optional[str] = None
     wine_binary: Optional[str] = None
+    speech_enabled: bool = False
     wine_release_channel: str = "stable"
     backup_dir: Optional[str] = None
 
@@ -378,7 +379,7 @@ class PersistentConfiguration:
         config_env.app_release_channel = config_dict["app_release_channel"]
         config_env._legacy = None
         for k, v in config_env.__dict__.items():
-            if v is not None:
+            if v is not None and k != "speech_enabled":
                 config_dict[k] = v
 
         return PersistentConfiguration(**config_dict)
@@ -608,6 +609,15 @@ class Config:
         """Writes configuration to file and lets the app know something changed"""
         self._raw.write_config()
         self.app._config_updated_event.set()
+
+    @property
+    def speech_enabled(self) -> bool:
+        return self._raw.speech_enabled
+
+    @speech_enabled.setter
+    def speech_enabled(self, value: bool) -> None:
+        self._raw.speech_enabled = value
+        self._write()
 
     def _relative_from_install_dir(self, path: Path | str) -> str:
         """Takes in a possibly absolute path under install dir and turns it into an

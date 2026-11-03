@@ -501,6 +501,16 @@ class ControlWindow(GuiApp):
         self.gui.logging_button.state(['disabled'])
         self.gui.support_button.config(command=self.get_support)
 
+        from . import opensapi
+        self.gui.speech_enabled.set(self.conf.speech_enabled)
+        self.gui.speech_configure.config(command=lambda: self.start_thread(opensapi.configure, self))
+        def toggle_speech():
+            self.conf.speech_enabled = self.gui.speech_enabled.get()
+            if self.conf.speech_enabled:
+                self.start_thread(opensapi.configure, self)
+            else:
+                self.start_thread(self.logos.speech.stop)
+        self.gui.speech_checkbox.config(command=toggle_speech)
         self.gui.config_button.config(command=self.edit_config)
         self.gui.deps_button.config(command=self.install_deps)
         self.gui.backup_button.config(command=self.run_backup)
