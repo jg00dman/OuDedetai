@@ -246,7 +246,6 @@ class VersionComparison(enum.Enum):
 def compare_logos_linux_installer_version(app: App) -> VersionComparison:
     current = Version(constants.LLI_CURRENT_VERSION)
     latest = Version(app.conf.app_latest_version)
-
     if current < latest:
         # Current release is older than recommended.
         output = VersionComparison.OUT_OF_DATE
@@ -257,7 +256,6 @@ def compare_logos_linux_installer_version(app: App) -> VersionComparison:
         # Current release is latest.
         output = VersionComparison.UP_TO_DATE
 
-    logging.debug(f"LLI self-update check: {output=}")
     return output
 
 

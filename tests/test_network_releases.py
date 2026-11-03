@@ -16,7 +16,7 @@ def release(name, date, assets, testing=False, **kwargs):
 class TestRuntimeReleaseAssets(unittest.TestCase):
     def fetch(self, releases, suffix):
         with patch.object(network, '_net_get', return_value=json.dumps(releases).encode()):
-            return network._get_release_data(REPO, asset_suffix=suffix)
+            return network._get_runtime_release_data(REPO, asset_suffix=suffix)
 
     def test_selects_bundle_and_appimage_by_format_not_asset_order(self):
         data = [release('10.0', '2026-10-01T00:00:00Z', ['checksums.txt', 'wine.AppImage', 'wine.tar.xz'])]
@@ -47,7 +47,7 @@ class TestRuntimeReleaseAssets(unittest.TestCase):
     def test_refresh_rechecks_both_channels_and_keeps_metadata(self):
         requests = object.__new__(network.NetworkRequests)
         result = network.GithubSoftwareReleasesInfo(network.SoftwareReleaseInfo('10', 'url', 'date'), None)
-        with patch.object(network, '_get_release_data', return_value=result) as fetch:
+        with patch.object(network, '_get_runtime_release_data', return_value=result) as fetch:
             self.assertIs(requests.wine_runtime_releases(), result)
             self.assertIs(requests.wine_runtime_releases(), result)
             self.assertEqual(fetch.call_count, 1)
@@ -65,3 +65,47 @@ class TestRuntimeReleaseAssets(unittest.TestCase):
                                      ['wine.AppImage', 'source.tar.gz', 'wine.bundle.tar.xz'])],
                             ('.bundle.tar.xz', '.AppImage'))
         self.assertTrue(result.latest.download_url.endswith('.bundle.tar.xz'))
+
+
+class TestLauncherReleaseSelection(unittest.TestCase):
+    def requests(self):
+        from unittest.mock import Mock
+        requests = object.__new__(network.NetworkRequests)
+        requests._cache = network.CachedRequests()
+        requests._cache._write = Mock()
+        return requests
+
+    def test_launcher_uses_asset_for_current_architecture(self):
+        requests = self.requests()
+        data = dict(tag_name='v4.1', assets=[
+            dict(name='oudedetai-arm', browser_download_url='https://example.invalid/arm'),
+            dict(name='oudedetai-x86_64', browser_download_url='https://example.invalid/x86_64')])
+        with patch('ou_dedetai.system.get_architecture', return_value=('x86_64', '')), \
+                patch.object(network, '_net_get', return_value=json.dumps(data).encode()):
+            result = requests.app_latest_version('stable')
+        self.assertEqual(result.download_url, 'https://example.invalid/x86_64')
+
+    def test_launcher_refresh_invalidates_architecture_specific_cache(self):
+        requests = self.requests()
+        def data(version):
+            return json.dumps(dict(tag_name=version, assets=[
+                dict(name='oudedetai-x86_64', browser_download_url='https://example.invalid/' + version)
+            ])).encode()
+        with patch('ou_dedetai.system.get_architecture', return_value=('x86_64', '')), \
+                patch.object(network, '_net_get', side_effect=[data('4.1'), data('4.2')]) as fetch:
+            self.assertEqual(requests.app_latest_version('stable').version, '4.1')
+            self.assertEqual(requests.app_latest_version('stable').version, '4.1')
+            self.assertEqual(requests.refresh_app_latest_version('stable').version, '4.2')
+        self.assertEqual(fetch.call_count, 2)
+
+    def test_launcher_dev_channel_selects_latest_published_testing_build(self):
+        requests = self.requests()
+        def build(version, date, draft=False):
+            return dict(tag_name=version, published_at=date, prerelease=True, draft=draft,
+                        assets=[dict(name='oudedetai-x86_64',
+                                     browser_download_url='https://example.invalid/' + version)])
+        data = [build('4.3', '2026-11-01T00:00:00Z', draft=True),
+                build('4.1', '2026-10-01T00:00:00Z'), build('4.2', '2026-10-20T00:00:00Z')]
+        with patch('ou_dedetai.system.get_architecture', return_value=('x86_64', '')), \
+                patch.object(network, '_net_get', return_value=json.dumps(data).encode()):
+            self.assertEqual(requests.app_latest_version('dev').version, '4.2')
