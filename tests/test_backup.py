@@ -34,15 +34,13 @@ class TestBackup(unittest.TestCase):
             self.assertEqual(bdirs, backup_dirs)
 
     def test_get_dir_group_size(self):
-        size_dir = 4096
-
         cmd = ['du', '-sb', str(TESTDATADIR)]
         size_du = int(subprocess.check_output(cmd).decode().split()[0])
-        size_testdata = size_du + size_dir  # add in 'data' dir
+        size_testdata = size_du
 
         cmd = ['du', '-sb', str(REPODIR / 'snap')]
         size_du = int(subprocess.check_output(cmd).decode().split()[0])
-        size_snap = size_du + size_dir*3  # add in 'snap', 'bin', 'gui' dirs
+        size_snap = size_du
 
         self.app.conf.backup_dir = Path('.')
         b = backup.BackupTask(self.app)

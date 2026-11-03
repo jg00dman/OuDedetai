@@ -227,9 +227,7 @@ class TestGeneralUtils(unittest.TestCase):
     def test_get_path_size_exists(self):
         cmd = ['du', '-sb', TESTDATADIR]
         size_du = int(subprocess.check_output(cmd).decode().split()[0])
-        size_dir = 4096
-        size = size_du + size_dir
-        self.assertEqual(size, utils.get_path_size(TESTDATADIR))
+        self.assertEqual(size_du, utils.get_path_size(TESTDATADIR))
 
     def test_get_path_size_notexists(self):
         self.assertEqual(0, utils.get_path_size('./no_dir'))
