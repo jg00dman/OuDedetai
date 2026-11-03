@@ -1,11 +1,8 @@
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock
 import ou_dedetai.backup as backup
-from . import REPODIR
-from . import TESTDATADIR
 
 
 class TestBackup(unittest.TestCase):
@@ -34,19 +31,14 @@ class TestBackup(unittest.TestCase):
             self.assertEqual(bdirs, backup_dirs)
 
     def test_get_dir_group_size(self):
-        cmd = ['du', '-sb', str(TESTDATADIR)]
-        size_du = int(subprocess.check_output(cmd).decode().split()[0])
-        size_testdata = size_du
-
-        cmd = ['du', '-sb', str(REPODIR / 'snap')]
-        size_du = int(subprocess.check_output(cmd).decode().split()[0])
-        size_snap = size_du
-
-        self.app.conf.backup_dir = Path('.')
-        b = backup.BackupTask(self.app)
-        dirs = [TESTDATADIR, REPODIR / 'snap']
-        size = b._get_dir_group_size(dirs)
-        self.assertEqual(size_testdata + size_snap, size)
+        with tempfile.TemporaryDirectory() as temporary:
+            dirs = [Path(temporary) / name for name in ('first', 'second')]
+            for directory in dirs:
+                directory.mkdir()
+                (directory / 'data').write_bytes(b'12345')
+            self.app.conf.backup_dir = Path('.')
+            size = backup.BackupTask(self.app)._get_dir_group_size(dirs)
+            self.assertEqual(10 + sum(directory.stat().st_size for directory in dirs), size)
 
     def test_set_dest_dir(self):
         with tempfile.TemporaryDirectory() as td:
