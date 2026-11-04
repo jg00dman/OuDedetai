@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from ou_dedetai.opensapi import ASSET, Speech
+from ou_dedetai.akousousin import ASSET, Speech
 from ou_dedetai.logos import State, LogosManager
 import subprocess
 
@@ -24,7 +24,7 @@ class SpeechTests(unittest.TestCase):
         self.speech = Speech(self.app)
 
     def test_only_shared_binary_path_is_derived(self):
-        self.assertEqual(self.speech.binary, self.root / 'share/OpenSAPI' / ASSET)
+        self.assertEqual(self.speech.binary, self.root / 'share/Akousousin' / ASSET)
         self.assertEqual(self.speech.command('--configure'), [str(self.speech.binary), '--configure'])
 
     def test_latest_standalone_download_and_checksum(self):
@@ -40,7 +40,7 @@ class SpeechTests(unittest.TestCase):
         download.__enter__ = Mock(return_value=download)
         download.__exit__ = Mock(return_value=False)
         download.iter_content.return_value = [data]
-        with patch('ou_dedetai.opensapi.requests.get', side_effect=[listing, checksum, download]) as get:
+        with patch('ou_dedetai.akousousin.requests.get', side_effect=[listing, checksum, download]) as get:
             self.speech.download()
         self.assertIn('/2026-11-02/', get.call_args_list[1].args[0])
         self.assertEqual(self.speech.binary.read_bytes(), data)
@@ -57,7 +57,7 @@ class SpeechTests(unittest.TestCase):
         download.__enter__ = Mock(return_value=download)
         download.__exit__ = Mock(return_value=False)
         download.iter_content.return_value = [b'bad']
-        with patch('ou_dedetai.opensapi.requests.get', side_effect=[listing, checksum, download]):
+        with patch('ou_dedetai.akousousin.requests.get', side_effect=[listing, checksum, download]):
             with self.assertRaisesRegex(RuntimeError, 'checksum mismatch'):
                 self.speech.download()
         self.assertEqual(self.speech.binary.read_bytes(), b'original')
@@ -65,7 +65,7 @@ class SpeechTests(unittest.TestCase):
     def test_start_stop_use_public_session_commands_only(self):
         self.speech.binary.parent.mkdir(parents=True)
         self.speech.binary.touch()
-        with patch('ou_dedetai.opensapi.subprocess.run') as run:
+        with patch('ou_dedetai.akousousin.subprocess.run') as run:
             self.speech.start()
             session = self.speech.session
             self.speech.stop()
@@ -75,15 +75,16 @@ class SpeechTests(unittest.TestCase):
         self.assertIsNone(self.speech.session)
 
     def test_no_session_means_no_stop_request(self):
-        with patch('ou_dedetai.opensapi.subprocess.run') as run:
+        with patch('ou_dedetai.akousousin.subprocess.run') as run:
             self.speech.stop()
         run.assert_not_called()
 
     def test_install_passes_prefix_and_wine_but_no_private_settings(self):
         self.speech.binary.parent.mkdir(parents=True)
         self.speech.binary.touch()
-        with patch('ou_dedetai.opensapi.subprocess.run', return_value=subprocess.CompletedProcess([], 0, '2')) as run, \
-                patch('ou_dedetai.opensapi.subprocess.Popen') as panel:
+        completed = subprocess.CompletedProcess([], 0, '2')
+        with patch('ou_dedetai.akousousin.subprocess.run', return_value=completed) as run, \
+                patch('ou_dedetai.akousousin.subprocess.Popen') as panel:
             self.speech.configure()
         args = run.call_args.args[0]
         self.assertEqual(args[args.index('--wine-prefix') + 1], self.app.conf.wine_prefix)

@@ -1,4 +1,4 @@
-"""Optional standalone OpenSAPI installation and Logos-session ownership."""
+"""Optional standalone Akousousin installation and Logos-session ownership."""
 import hashlib
 import logging
 import os
@@ -10,8 +10,8 @@ import uuid
 
 import requests
 
-ASSET = 'OpenSAPI-x86_64.AppImage'
-REPOSITORY = 'https://api.github.com/repos/jg00dman/opensapi'
+ASSET = 'Akousousin-x86_64.AppImage'
+REPOSITORY = 'https://api.github.com/repos/jg00dman/akousousin'
 
 
 class Speech:
@@ -21,7 +21,7 @@ class Speech:
 
     @property
     def binary(self):
-        return Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'OpenSAPI' / ASSET
+        return Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'Akousousin' / ASSET
 
     def command(self, *args):
         return [str(self.binary), *args]
@@ -57,8 +57,8 @@ class Speech:
     def download(self):
         import platform
         if platform.machine() not in ('x86_64', 'AMD64'):
-            raise RuntimeError('The OpenSAPI beta currently supports x86-64 Linux only')
-        self.app.status('Downloading the latest standalone OpenSAPI beta…')
+            raise RuntimeError('The Akousousin beta currently supports x86-64 Linux only')
+        self.app.status('Downloading the latest standalone Akousousin beta…')
         response = requests.get(REPOSITORY + '/releases?per_page=100', timeout=30)
         response.raise_for_status()
         releases = sorted(response.json(), key=lambda r: r.get('published_at') or '', reverse=True)
@@ -66,7 +66,7 @@ class Speech:
                        for release in releases if not release['draft'] and
                        {ASSET, 'SHA256SUMS'} <= {a['name'] for a in release['assets']}), None)
         if not assets:
-            raise RuntimeError('No standalone OpenSAPI release was found')
+            raise RuntimeError('No standalone Akousousin release was found')
         response = requests.get(assets['SHA256SUMS'], timeout=30)
         response.raise_for_status()
         expected = next((line.split()[0] for line in response.text.splitlines()
@@ -83,11 +83,11 @@ class Speech:
                 with target.open('wb') as output:
                     for chunk in download.iter_content(1024 * 1024):
                         if time.monotonic() > deadline or output.tell() > 512 * 1024 * 1024:
-                            raise TimeoutError('OpenSAPI download exceeded its limit')
+                            raise TimeoutError('Akousousin download exceeded its limit')
                         output.write(chunk)
                         digest.update(chunk)
             if digest.hexdigest() != expected:
-                raise RuntimeError('OpenSAPI checksum mismatch; nothing was installed')
+                raise RuntimeError('Akousousin checksum mismatch; nothing was installed')
             target.chmod(0o755)
             target.replace(self.binary)
 
@@ -112,7 +112,7 @@ class Speech:
                 subprocess.run(self.command('--release-session', self.session), env=self.environment(),
                                check=True, timeout=100, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except (OSError, subprocess.SubprocessError):
-                logging.exception('Could not release speech session; OpenSAPI also checks owner lifetime')
+                logging.exception('Could not release speech session; Akousousin also checks owner lifetime')
             self.session = None
 
 

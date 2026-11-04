@@ -1,8 +1,8 @@
-name: Build OpenSAPI working branch
+name: Build Akousousin working branch
 on:
   workflow_dispatch:
   push:
-    branches: [codex/opensapi]
+    branches: [codex/akousousin]
 permissions:
   contents: read
 jobs:
@@ -19,7 +19,7 @@ jobs:
         run: |
           cp tests/test_backup.py /tmp/test_backup.py
           cp tests/test_utils.py /tmp/test_utils.py
-          git fetch --depth=1 origin codex/opensapi-test-fixtures
+          git fetch --depth=1 origin codex/akousousin-test-fixtures
           git show FETCH_HEAD:tests/test_backup.py > tests/test_backup.py
           git show FETCH_HEAD:tests/test_utils.py > tests/test_utils.py
           python -m unittest discover -v
@@ -46,12 +46,12 @@ jobs:
           bash scripts/build-binary.sh x86_64
           mv dist/oudedetai dist/oudedetai-x86_64
           dist/oudedetai-x86_64 --help
-          cp OPENSAPI.md dist/
-          (cd dist && sha256sum oudedetai-x86_64 OPENSAPI.md > SHA256SUMS)
+          cp AKOUSOUSIN.md dist/
+          (cd dist && sha256sum oudedetai-x86_64 AKOUSOUSIN.md > SHA256SUMS)
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: oudedetai-opensapi-x86_64-${{ github.run_id }}
+          name: oudedetai-akousousin-x86_64-${{ github.run_id }}
           path: |
             dist/oudedetai-x86_64
-            dist/OPENSAPI.md
+            dist/AKOUSOUSIN.md
             dist/SHA256SUMS

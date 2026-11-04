@@ -12,7 +12,7 @@ from ou_dedetai import constants, database
 from ou_dedetai.app import App
 from ou_dedetai.config import get_logos_user_id
 
-from . import opensapi
+from . import akousousin
 from . import system
 from . import utils
 from . import wine
@@ -30,7 +30,7 @@ class LogosManager:
         self.logos_state = State.STOPPED
         self.indexing_state = State.STOPPED
         self.app = app
-        self.speech = opensapi.Speech(app)
+        self.speech = akousousin.Speech(app)
         self.processes: dict[str, subprocess.Popen] = {}
         """These are sub-processes we started"""
         self.existing_processes: dict[str, list[psutil.Process]] = {}
