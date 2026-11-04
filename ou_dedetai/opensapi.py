@@ -38,17 +38,16 @@ class Speech:
 
     def configure(self):
         from .logos import State
-        manifest = Path(self.app.conf.wine_prefix) / 'drive_c/Program Files/OpenSAPI/install-state.json'
         current = False
         if self.binary.exists():
             probe = subprocess.run(self.command('--protocol-version'), env=self.environment(),
                                    capture_output=True, text=True, timeout=15)
             current = probe.returncode == 0 and probe.stdout.strip() == '2'
-        if not current or not manifest.exists():
+        if not current:
             if self.app.logos.logos_state != State.STOPPED:
                 raise RuntimeError('Close Logos before installing speech support')
-            if not current:
-                self.download()
+            self.download()
+        if self.app.logos.logos_state == State.STOPPED:
             with tempfile.TemporaryFile() as output:
                 subprocess.run(self.command('--wine-prefix', self.app.conf.wine_prefix,
                     '--wine', self.app.conf.wine_binary, '--install-only'), env=self.environment(),
