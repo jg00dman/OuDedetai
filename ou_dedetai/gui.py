@@ -246,8 +246,8 @@ class ControlGui(StatusGui):
         s2 = Separator(self, orient='horizontal')
 
         self.speech_enabled = BooleanVar(value=False)
-        self.speech_checkbox = Checkbutton(self, text="Enable speech", variable=self.speech_enabled)
-        self.speech_configure = Button(self, text="Configure speech…")
+        self.speech_checkbox = Checkbutton(self, text="Enable speech", variable=self.speech_enabled, state='disabled')
+        self.speech_configure = Button(self, text="Configure speech…", state='disabled')
         # Edit config button
         self.config_label = Label(self, text="Edit config file")
         self.config_button = Button(self, text="Edit …")

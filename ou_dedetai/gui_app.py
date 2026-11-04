@@ -426,13 +426,19 @@ class InstallerWindow:
             """Function to handle the install"""
             # Close the options window and let the install run
             self.close()
-            installer.install(self.app)
+            try:
+                installer.install(self.app)
+                self.app._speech_install_ready = True
+            finally:
+                self.app.root.after(0, self.app.update_speech_controls)
             # Install complete, cleaning up...
             return 0
 
         # Setup for the install
         self.app.status('Ready to install!', 0)
         self.set_input_widgets_state('disabled')
+        self.app._speech_install_ready = False
+        self.app.update_speech_controls()
 
         self.start_thread(_install)
 
@@ -446,6 +452,7 @@ class ControlWindow(GuiApp):
         self.root = root
         self.gui = control_gui
         self.actioncmd: Optional[Callable[[], None]] = None
+        self._speech_install_ready = True
 
         ver = constants.LLI_CURRENT_VERSION
         text = f"Update {constants.APP_NAME}\ncurrent: v{ver}\nlatest: ..." 
@@ -539,6 +546,7 @@ class ControlWindow(GuiApp):
             try:
                 self.populate_defaults()
                 installer.install(self)
+                self._speech_install_ready = True
             except UserExitedFromAsk:
                 # Ensure that the defaults are properly set back up
                 self.populate_defaults()
@@ -546,9 +554,12 @@ class ControlWindow(GuiApp):
                 # Enable the run button
                 self.gui.app_button.state(['!disabled'])
                 self.gui.app_install_advanced.state(['!disabled'])
+                self.root.after(0, self.update_speech_controls)
         # Disable the install buttons
         self.gui.app_button.state(['disabled'])
         self.gui.app_install_advanced.state(['disabled'])
+        self._speech_install_ready = False
+        self.update_speech_controls()
         # Start the install thread.
         self.start_thread(_install)
 
@@ -679,7 +690,13 @@ class ControlWindow(GuiApp):
         self.gui.loggingstatevar.set(state[:-1].title())
         self.gui.logging_button.state(['!disabled'])
 
+    def update_speech_controls(self):
+        state = '!disabled' if self._speech_install_ready and self.is_installed() else 'disabled'
+        self.gui.speech_checkbox.state([state])
+        self.gui.speech_configure.state([state])
+
     def update_app_button(self, evt=None):
+        self.update_speech_controls()
         self.gui.app_button.state(['!disabled'])
         if self.is_installed():
             if self.logos.logos_state == ou_dedetai.logos.State.RUNNING:

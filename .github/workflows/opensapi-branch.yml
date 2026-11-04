@@ -37,6 +37,8 @@ jobs:
           root.update()
           assert gui.speech_checkbox.cget('text') == 'Enable speech'
           assert gui.speech_configure.cget('text') == 'Configure speech…'
+          assert gui.speech_checkbox.instate(['disabled'])
+          assert gui.speech_configure.instate(['disabled'])
           root.destroy()
           PY
       - name: Build and smoke-test existing binary format
