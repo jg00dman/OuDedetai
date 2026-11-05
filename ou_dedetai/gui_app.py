@@ -679,7 +679,13 @@ class ControlWindow(GuiApp):
         self.root.event_generate(evt)
 
     def set_runner(self):
-        choice = self._ask("Select Runner", self.runner_options())
+        self.status("Loading runner choices…")
+        self.root.update_idletasks()
+        try:
+            options = self.runner_options()
+        finally:
+            self.clear_status()
+        choice = self._ask("Select Runner", options)
         if choice and self.select_runner(choice):
             def setup():
                 wine.setup_wine(self)

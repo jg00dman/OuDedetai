@@ -82,6 +82,8 @@ class TestRunnerSelection(unittest.TestCase):
         self.app = object.__new__(ControlWindow)
         self.app.root = Mock()
         self.app.start_thread = lambda task: task()
+        self.app.status = Mock()
+        self.app.clear_status = Mock()
         self.app.conf = SimpleNamespace(wine_binary='/old/wine')
 
     @patch('ou_dedetai.gui_app.utils.get_wine_options', return_value=['Recommended Bundled'])
