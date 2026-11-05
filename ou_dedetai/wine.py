@@ -1,3 +1,5 @@
+import re
+import tarfile
 from dataclasses import dataclass
 import logging
 import os
@@ -14,6 +16,7 @@ from ou_dedetai.app import App
 from . import network
 from . import system
 from . import utils
+
 
 def check_wineserver(app: App) -> bool:
     # FIXME: if the wine version changes, we may need to restart the wineserver
@@ -253,9 +256,40 @@ def initializeWineBottle(wine64_binary: str, app: App):
     )
 
 
+def get_win_version(app: App, exe: str) -> Optional[str]:
+    if exe == "logos":
+        process = run_wine_completed_process(
+            app, app.conf.wine_binary, exe="winecfg", exe_args=["/v"]
+        )
+        if process.returncode == 0:
+            return (process.stdout or process.stderr).strip() or None
+        return None
+
+    if exe == "indexer":
+        key = (
+            f"HKEY_CURRENT_USER\\Software\\Wine\\AppDefaults\\"
+            f"{app.conf.faithlife_product}Indexer.exe"
+        )
+        process = run_wine_completed_process(
+            app, app.conf.wine_binary, exe="reg.exe",
+            exe_args=["query", key, "/v", "Version"],
+        )
+        if process.returncode == 0:
+            match = re.search(
+                r"^\s*Version\s+REG_SZ\s+(\S+)\s*$",
+                process.stdout, re.MULTILINE,
+            )
+            if match:
+                return match.group(1)
+
+        return get_win_version(app, "logos")
+
+    raise ValueError(f"Unknown executable: {exe}")
+
+
 def set_win_version(app: App, exe: str, windows_version: str):
     if exe == "logos":
-        # This operation is equivilent to f"winetricks -q settings {windows_version}"
+        # This operation is equivalent to f"winetricks -q settings {windows_version}"
         # but faster
         run_wine_during_install(
             app,
@@ -347,7 +381,7 @@ def wine_reg_install(app: App, name: str, reg_text: str, wine64_binary: str):
             wineserver_wait(app)
         except subprocess.CalledProcessError:
             failed = "Failed to install reg file"
-            logging.exception(f"{failed}. {process=}")
+            logging.exception(f"{failed}")
             app.exit(f"{failed}: {reg_file}")
         finally:
             reg_file.unlink()
@@ -361,6 +395,34 @@ def disable_winemenubuilder(app: App, wine64_binary: str):
 "winemenubuilder.exe"=""
 '''
     wine_reg_install(app, name, reg_text, wine64_binary)
+
+
+def get_renderer(app: App) -> Optional[str]:
+    """Get the configured Wine Direct3D renderer."""
+    user_reg = Path(app.conf.wine_prefix) / "user.reg"
+    if not user_reg.is_file():
+        logging.debug("Wine user.reg not found: %s", user_reg)
+        return None
+
+    try:
+        contents = user_reg.read_text()
+        section = re.search(
+            r'^\[Software\\\\Wine\\\\Direct3D\].*?(?=^\[|\Z)',
+            contents,
+            re.MULTILINE | re.DOTALL | re.IGNORECASE,
+        )
+        if section:
+            renderer = re.search(
+                r'^"renderer"="([^"]+)"',
+                section.group(),
+                re.MULTILINE | re.IGNORECASE,
+            )
+            if renderer:
+                return renderer.group(1).lower()
+    except OSError:
+        logging.exception("Failed to read Wine renderer configuration")
+
+    return None
 
 
 def set_renderer(app: App, wine64_binary: str, value: str):
@@ -808,6 +870,39 @@ def get_wine_env(app: App, additional_wine_dll_overrides: Optional[str]=None) ->
         wine_env["WINEDLLOVERRIDES"] += ";" + additional_wine_dll_overrides
 
     updated_env = {k: wine_env.get(k) for k in wine_env_defaults.keys()}
+
     logging.debug(f"Wine env: {updated_env}")
     # Extra safe calling this here, it should be called run run_command anyways
     return system.fix_ld_library_path(wine_env)
+
+
+def setup_wine(app: App):
+    from .installer import download_wine, create_wine_symlinks
+    downloaded_file = download_wine(app)
+
+    if downloaded_file is not None and downloaded_file.name.lower().endswith(".appimage"):
+        # Retain compatibility with existing AppImage-based installations.
+        app.conf.wine_binary = str(downloaded_file.absolute())
+    elif downloaded_file is not None and downloaded_file.name.lower().endswith((".tar.gz", ".tgz", ".tar.xz")):
+        distribution_root = Path(app.conf.wine_distribution_dir)
+        distribution_root.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(downloaded_file, "r:*") as tarball:
+            members = tarball.getmembers()
+            top_level_dirs = {
+                member.name.split("/", 1)[0]
+                for member in members
+                if "/" in member.name
+            }
+            if len(top_level_dirs) != 1:
+                raise RuntimeError("Wine tarball must contain exactly one top-level directory")
+            distribution_dir = distribution_root / next(iter(top_level_dirs))
+            if distribution_dir.exists():
+                shutil.rmtree(distribution_dir)
+            tarball.extractall(distribution_root, filter="data")
+        wine_path = Path(app.conf.wine_path_in_distribution)
+        if not wine_path.is_file():
+            raise RuntimeError("Downloaded tarball didn't contain the needed Wine binary")
+        app.conf.wine_binary = str(wine_path.absolute())
+        app.conf.wine_appimage_path = None
+
+    create_wine_symlinks(app)

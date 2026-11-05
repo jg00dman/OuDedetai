@@ -19,7 +19,7 @@ from textual.widgets.option_list import Option
 from ou_dedetai.app import App, UserExitedFromAsk
 from ou_dedetai.config import EphemeralConfiguration
 
-from . import control
+from . import control, msg
 from . import constants
 from . import installer
 from . import logos
@@ -289,16 +289,23 @@ class TextualUI(TextualApp[None]):
     def _populate_main_menu(self) -> None:
         menu = self.query_one("#main-menu", OptionList)
         options = [str(label) for label in self.domain.set_tui_menu_options()]
-        current_options = [str(option.prompt) for option in menu.options]
-        current = menu.highlighted
+        current = (
+            str(menu.get_option_at_index(menu.highlighted).prompt)
+            if menu.highlighted is not None and menu.option_count
+            else None
+        )
 
+        current_options = [str(option.prompt) for option in menu.options]
         if options != current_options:
             menu.clear_options()
             for i, label in enumerate(options):
                 menu.add_option(Option(label, id=f"main-{i}"))
 
         if options:
-            menu.highlighted = min(current if current is not None else 0, len(options) - 1)
+            if current in options:
+                menu.highlighted = options.index(current)
+            else:
+                menu.highlighted = min(menu.highlighted or 0, len(options) - 1)
 
     @on(OptionList.OptionSelected, "#main-menu")
     def on_main_menu(self, event: OptionList.OptionSelected) -> None:
@@ -442,13 +449,15 @@ class TUI(App):
     def set_tui_menu_options(self) -> list[str]:
         labels: list[str] = []
 
-        if getattr(constants, "RUNMODE", "") == "binary":
-            try:
-                status = utils.compare_logos_linux_installer_version(self)
-                if status == utils.VersionComparison.OUT_OF_DATE:
-                    labels.append(f"Update {constants.APP_NAME}")
-            except Exception:
-                pass
+        try:
+            status = utils.compare_logos_linux_installer_version(self)
+            if status == utils.VersionComparison.OUT_OF_DATE:
+                labels.append(
+                    f"Update {constants.APP_NAME} [{self.conf.app_latest_version}]"
+                )
+        except Exception as e:
+            logging.error("TUI: Error Comparing Ou Dedetai Version:\n"
+                          f"{e}")
 
         if self.is_installed():
             product = self.conf.faithlife_product
@@ -463,7 +472,11 @@ class TUI(App):
                 labels.append("Run Indexing")
 
             if not getattr(self.conf, "is_installed_faithlife_product_release_latest", True):
-                labels.append(f"Update {product}")
+                latest = getattr(self.conf, "latest_faithlife_product_release", None)
+                label = f"Update {product}"
+                if latest:
+                    label += f" to {latest}"
+                labels.append(label)
         else:
             labels.extend(["Install", "Advanced Install"])
 
@@ -499,8 +512,26 @@ class TUI(App):
             if self._installer_thread and self._installer_thread.is_alive():
                 self.status("A previous install is still running")
                 return
+
+            advanced = choice == "Advanced Install"
+            original_wine_binary = self.conf._raw.wine_binary
+
             if choice == "Install":
                 self.conf._overrides.assume_yes = True
+
+            def _install() -> None:
+                if advanced:
+                    self.conf._raw.wine_binary = None
+                try:
+                    installer.install(app=self)
+                except UserExitedFromAsk:
+                    pass
+                finally:
+                    if advanced and self.conf._raw.wine_binary is None:
+                        self.conf._raw.wine_binary = original_wine_binary
+                    self.conf._overrides.assume_yes = original_assume_yes
+                    self.go_to_main_menu()
+
             self._installer_thread = threading.Thread(target=_install, daemon=True)
             self._installer_thread.start()
             self.status("Starting installation…")
@@ -555,10 +586,11 @@ class TUI(App):
         if not choice or choice == "Return to Main Menu":
             self.go_to_main_menu()
             return
-        if choice == "Set Renderer":
+        if choice.startswith("Set Renderer"):
             self.ui.push_screen(
                 MenuModal("Choose Renderer", ["gdi", "gl", "dxvk", "vulkan", "Return to Main Menu"]),
-                callback=self.renderer_select)
+                callback=self.renderer_select,
+            )
         elif choice == "Set Windows Version for Logos":
             self.ui.push_screen(MenuModal("Windows Version for Logos", constants.WINDOWS_VERSIONS),
                                 callback=self.win_ver_logos_select)
@@ -581,10 +613,12 @@ class TUI(App):
                 self.conf.reload()
             elif choice == f"Check for {constants.APP_NAME} Updates":
                 utils.check_for_updates(self, force=True)
-            elif choice == "Change Logos Release Channel":
+            elif choice == "Change FaithLife Release Channel":
                 self.conf.toggle_faithlife_product_release_channel()
             elif choice == f"Change {constants.APP_NAME} Release Channel":
                 self.conf.toggle_installer_release_channel()
+            elif choice == "Change Wine Release Channel":
+                self.conf.toggle_wine_release_channel()
             elif choice == "Install Dependencies":
                 utils.install_dependencies(self)
             elif choice == "Install ICU":
@@ -600,7 +634,7 @@ class TUI(App):
             elif choice == "Uninstall":
                 control.uninstall(self)
             elif choice == "Update to Latest AppImage":
-                utils.update_to_latest_recommended_appimage(self)
+                installer.update_to_latest_wine(self)
         except UserExitedFromAsk:
             pass
         self.go_to_main_menu()
@@ -627,10 +661,15 @@ class TUI(App):
         self.go_to_main_menu()
 
     def set_wineconfig_menu_options(self) -> list[str]:
+        renderer = wine.get_renderer(self)
+        renderer_label = renderer or "Unknown"
+        logos_win_version = wine.get_win_version(self, "logos") or "Unknown"
+        indexer_win_version = wine.get_win_version(self, "indexer") or "Default"
+
         return [
-            "Set Renderer",
-            "Set Windows Version for Logos",
-            "Set Windows Version for Indexer",
+            f"Set Renderer (Current: {renderer_label})",
+            f"Set Windows Version for Logos (Current: {logos_win_version})",
+            f"Set Windows Version for Indexer (Current: {indexer_win_version})",
             "Return to Main Menu",
         ]
 
@@ -661,6 +700,7 @@ class TUI(App):
 
 
 def control_panel_app(ephemeral_config: EphemeralConfiguration) -> None:
+    msg.initialize_tui_logging()
     tui = TUI(ephemeral_config)
     try:
         tui.ui.run()

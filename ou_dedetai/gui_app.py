@@ -55,16 +55,15 @@ class GuiApp(App):
 
 
     def _ask(self, question: str, options: list[str] | str) -> Optional[str]:
-        # This cannot be run from the main thread as the dialog will never appear
-        # since the tinker mainloop hasn't started and we block on a response
-
+        # Safe from any thread once mainloop runs; wait_window pumps Tk events.
         if isinstance(options, list):
             answer_q: Queue[Optional[str]] = Queue()
             answer_event = Event()
-            ChoicePopUp(question, options, answer_q, answer_event)
+            popup = ChoicePopUp(question, options, answer_q, answer_event)
 
-            answer_event.wait()
-            answer: Optional[str] = answer_q.get()
+            self.root.wait_window(popup.root)
+            # Empty if closed via the window manager
+            answer: Optional[str] = answer_q.get_nowait() if not answer_q.empty() else None
         elif isinstance(options, str):
             answer = options
 
@@ -639,7 +638,7 @@ class ControlWindow(GuiApp):
         self.start_thread(self.update_to_latest_appimage, evt=evt)
 
     def update_to_latest_appimage(self, evt=None):
-        utils.update_to_latest_recommended_appimage(self)
+        installer.update_to_latest_wine(self)
         self.root.event_generate(evt)
 
     def set_appimage(self, evt=None):
@@ -742,7 +741,12 @@ class ControlWindow(GuiApp):
         if not self.is_installed():
             state = "disabled"
             msg = "Please install first"
-        elif self.conf._raw.wine_binary_code not in ["Recommended", "AppImage", None]:
+        elif self.conf.wine_binary not in (
+            constants.WINE_RECOMMENDED_APPIMAGE_SIGIL,
+            constants.WINE_UNTESTED_STABLE_APPIMAGE_SIGIL,
+            constants.WINE_UNTESTED_STAGING_APPIMAGE_SIGIL,
+            constants.WINE_UNTESTED_DEVELOPMENT_APPIMAGE_SIGIL,
+        ):
             state = 'disabled'
             msg = "This button is disabled. The configured install was not created using an AppImage."
             self.gui.set_appimage_button.state(['disabled'])
@@ -751,7 +755,7 @@ class ControlWindow(GuiApp):
                 "This button is disabled. The configured install was not created using an AppImage."
             )
         elif self.conf._raw.wine_binary is not None:
-            status, _ = utils.compare_recommended_appimage_version(self)
+            status, _ = utils.compare_recommended_wine_version(self)
             if status == 0:
                 state = '!disabled'
             elif status == 1:
