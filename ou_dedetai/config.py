@@ -934,6 +934,8 @@ class Config:
 
     @property
     def wine_path_in_distribution(self) -> str:
+        if self.is_wine_binary_in_distribution:
+            return self.wine_binary
         return str(next(Path(self.wine_distribution_dir).glob("*/bin/wine")).absolute())
 
     @property
